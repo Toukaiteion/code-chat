@@ -13,9 +13,10 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { Migration, MigrationResult } from './types.ts'
 import { migration0001 } from './0001-init.ts'
+import { migration0002 } from './0002-workspace-dir-name.ts'
 
 /** 全部迁移，按版本升序。新增迁移只需往这里追加。 */
-export const MIGRATIONS: readonly Migration[] = [migration0001]
+export const MIGRATIONS: readonly Migration[] = [migration0001, migration0002]
 
 /** 账本表的建表语句。刻意不放进迁移列表 —— 它是 runner 的基础设施。 */
 const LEDGER_DDL = /* sql */ `

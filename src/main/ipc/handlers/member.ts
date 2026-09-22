@@ -1,5 +1,6 @@
 import type { HandlerContext, Registry } from '../registry.ts'
 import { AppError, NotFoundError } from '../errors.ts'
+import { readHashedFile } from './file-hash.ts'
 
 /**
  * `WorkspaceMember` = `Actor` × `Workspace`（§2.4）。
@@ -22,7 +23,7 @@ export function registerMember(r: Registry, ctx: HandlerContext): void {
    * 放在同一个 `tx` 里是必须的：否则中途失败会留下一个**永远没有 session 的成员**，
    * 而这种半成品没有任何通道能修复它。
    */
-  r.handle('member:create', ({ workspaceId, actorId, displayName, roleDescPath }) => {
+  r.handle('member:create', async ({ workspaceId, actorId, displayName, roleDescPath }) => {
     if (!repos.workspace.get(workspaceId)) throw new NotFoundError('工作空间', workspaceId)
     if (!repos.actor.get(actorId)) throw new NotFoundError('角色', actorId)
 
@@ -34,6 +35,13 @@ export function registerMember(r: Registry, ctx: HandlerContext): void {
       })
     }
 
+    /**
+     * ★ 这里原本有个**安静的洞**：M3 收下 `roleDescPath` 却不传 `roleDescHash`，
+     * 于是库里落成「路径有、hash 为 NULL」—— 而 §4.6 正是拿这个 hash 当缓存键的。
+     * 它不会报错，只会让缓存判定一直错下去。现在两条一起落，读不了文件就两条都不落。
+     */
+    const roleDesc = roleDescPath ? await readHashedFile('职责文件', roleDescPath) : null
+
     const now = ctx.now()
     const memberId = ctx.newId()
     const sessionId = ctx.newId()
@@ -44,7 +52,8 @@ export function registerMember(r: Registry, ctx: HandlerContext): void {
         workspaceId,
         actorId,
         displayName,
-        roleDescPath,
+        roleDescPath: roleDesc?.path ?? null,
+        roleDescHash: roleDesc?.hash ?? null,
         now
       })
       repos.session.create(sessionId, workspaceId, memberId, now)
@@ -61,8 +70,19 @@ export function registerMember(r: Registry, ctx: HandlerContext): void {
     return updated
   })
 
-  r.handle('member:setRoleDesc', ({ id, roleDescPath, roleDescHash }) => {
-    const updated = repos.member.setRoleDesc(id, roleDescPath, roleDescHash, ctx.now())
+  /**
+   * 换职责文件。同 `actor:setPersona`：**hash 由主进程算**（渲染侧没有 fs），
+   * 路径与 hash 一起落 —— 传 `null` 表示清空。
+   */
+  r.handle('member:setRoleDesc', async ({ id, roleDescPath }) => {
+    if (!repos.member.get(id)) throw new NotFoundError('成员', id)
+    const roleDesc = roleDescPath === null ? null : await readHashedFile('职责文件', roleDescPath)
+    const updated = repos.member.setRoleDesc(
+      id,
+      roleDesc?.path ?? null,
+      roleDesc?.hash ?? null,
+      ctx.now()
+    )
     if (!updated) throw new NotFoundError('成员', id)
     return updated
   })

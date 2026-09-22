@@ -279,8 +279,11 @@ MetaGPT 的核心机制是**类型化产物 + 发布订阅**（role `_watch` 特
 src/main/
 ├─ index.ts              应用生命周期、单实例锁、窗口创建
 ├─ ipc/
-│  ├─ registry.ts        typed handle/on + zod 校验 + 错误信封
-│  └─ handlers/          workspace / project / actor / member / session / turn / stream
+│  ├─ registry.ts        typed handle/on + zod 校验 + 错误信封（**不 import electron**，见 §8.8c）
+│  ├─ context.ts         HandlerContext = { store, now(), newId(), view, sys }
+│  ├─ system-capabilities.ts  ★ 唯一 import electron 的 IPC 文件：dialog / shell / 根目录 / git 定位
+│  └─ handlers/          workspace / project / actor / member / session / turn / message / misc / system
+│     └─ file-hash.ts    ★ readHashedFile()：主进程算 sha256（§4.3 的 hash 纪律）
 ├─ domain/               ★ 纯 TS。不 import electron，也不 import node:sqlite
 │  ├─ context-builder.ts     ★ 提示词装配：<env> <summary> <recent> <trigger>
 │  ├─ compaction-service.ts  阈值检测 + 摘要生成
@@ -302,7 +305,10 @@ src/main/
 ├─ persist/
 │  ├─ db.ts  migrations/  repositories/  blob-store.ts  retention.ts
 └─ infra/
-   └─ paths.ts  logger.ts  git.ts  config.ts
+   ├─ paths.ts      dbPath() / blobsRoot() / ★ workspacesRoot()（= userData/workspaces，§8.3）
+   ├─ space-dir.ts  ★ 目录名净化与去重、目录树、workspace.json 铭牌（**纯函数，不 import electron**）
+   ├─ fs-ops.ts     ★ 副本删除的设卡与回收（只动 copy/clone，local 一个字节都不碰）
+   └─ git.ts        ★ 只服务导入：定位 git.exe + clone（`execFile`，`shell:false`）
 ```
 
 **唯一不可破的架构约束**：`domain/` **不得 import `electron` 或 `node:sqlite`**。服务通过构造注入接收 repository 和 emitter。这买到三件事：
@@ -459,12 +465,12 @@ CREATE INDEX idx_event_retention ON message_event(kind, created_at);
 
 **通道命名**：`domain:verb`（invoke/handle），`stream:*` / `app:*`（推送）。
 
-**渲染 → 主**（`invoke`）—— **权威清单在 `src/shared/ipc/channels.ts`**（44 条），下方是分组概要，实现时以那个文件为准：
+**渲染 → 主**（`invoke`）—— **权威清单在 `src/shared/ipc/channels.ts`**（**47 条**，M4 新增 5 条），下方是分组概要，实现时以那个文件为准：
 
 ```
-workspace:list | create | update | delete | setActive
-project:list | addLocal | copy | clone | rename | remove
-actor:list | get | create | update | remove
+workspace:list | create | update | delete | setActive | paths
+project:list | addLocal | copy | clone | defaultTarget | rename | remove
+actor:list | get | create | update | setPersona | remove
 member:list | create | remove | setEnabled | setRoleDesc | setRouter | setPermissions
        | visibility | setVisibility | setPrimary | clearVisibility
 session:list | getByMember | remove
@@ -473,12 +479,39 @@ message:getEvents     # 单条消息的完整未截断事件（含 thinking）
 turn:send             # { workspaceId, memberId, text, mentions[] } → { turnId }
 turn:stop | stopAll | interject
 turn:list | get | listLive
+dialog:pickPath       # { mode:'file'|'directory', title?, defaultPath? } → { path: string|null }（取消 = null）
+shell:revealPath      # { path } → { opened: boolean }（打不开给 false，不抛）
 view:setActive        # { workspaceId, sessionId } — 驱动跨空间抑制
 stream:resume         # { sessionId, fromSeq }
 runtime:getState      # 运行中的轮、队列深度、并发槽位
 ```
 
 （`project:setActive` **不存在**：切换活跃项目是 `workspace:setActive`，因为那是空间的属性而不是项目的。）
+
+> **M3 那行写的「44 条」是数错了，实际是 42 条**（M4 落地时用 `git show` 数了当时的 `channels.ts`）。42 + M4 新增 5 条 = 47。数字本身不重要，但它被引用在两个地方，错着留着会让人以为有两条通道丢了。
+
+#### M4 的契约变更（5 新增 + 4 修改）
+
+**新增 5 条**（都是「渲染侧够不着」或「主进程才知道答案」的能力）：
+
+| 通道 | req → res | 为什么必须新增 |
+|---|---|---|
+| `workspace:paths` | `{ id }` → `{ rootPath, projectsPath, scratchPath, exists }` | 空间目录在 `userData` 里，用户看不见。要能显示它、也要能算出默认落点 |
+| `project:defaultTarget` | `{ workspaceId, name }` → `{ path }` | §8.3 的默认落点 = `<空间目录>/projects/<项目名>`。**放主进程算**，免得渲染侧自己做平台路径拼接 |
+| `dialog:pickPath` | `{ mode, title?, defaultPath? }` → `{ path: string\|null }` | `dialog.showOpenDialog` **只能主进程调** |
+| `shell:revealPath` | `{ path }` → `{ opened: boolean }` | 「在资源管理器中打开空间目录」—— 用户把根选在了隐藏位置，这是补偿 |
+| `actor:setPersona` | `{ id, personaPath }` → `Actor` | `actor:update` 刻意不碰人设；重选人设是独立一步（读文件 + 算 hash，§4.6） |
+
+**修改 4 条**：
+
+| 通道 | 改动 | 理由 |
+|---|---|---|
+| `workspace:delete` | req `+ deleteCopies?`；res → `{ deleted, removedCopies[], failedCopies[] }` | §8.2 说副本「提示后删除」。**删了什么、什么没删掉必须如实返回**，不能吞 |
+| `project:remove` | req `+ deleteCopy?`；res → `{ deleted, removedCopy, failedReason }` | 同一条纪律 |
+| `actor:create` | req **去掉** `personaHash` | 渲染侧**无法**算文件 hash（没有 fs），而旧契约却要求它传 —— 那个契约在当前形态下根本用不了 |
+| `member:setRoleDesc` | req **去掉** `roleDescHash`，只留 `{ id, roleDescPath: string\|null }` | 同上 |
+
+> ★ **顺带修掉一个会安静地错下去的洞**：`member:create` 收 `roleDescPath` 却不写 `roleDescHash`，于是仓库把 hash 落成 NULL —— 路径有、hash 没有，而 §4.6 用 hash 做缓存键。M4 统一成一条纪律：**凡是主进程能自己算的 hash，一律主进程算**（`src/main/ipc/handlers/file-hash.ts` 的 `readHashedFile(path) → { path, hash }`，sha256），`actor:create` / `actor:setPersona` / `member:create` / `member:setRoleDesc` 四条路径共用它。
 
 **主 → 渲染**（只四个通道，刻意克制）：
 ```
@@ -679,6 +712,32 @@ spawn(claudeExePath, args, {
 
 选它的理由：可以**从 React 外部驱动更新**（`useStore.setState`），正是 IPC 监听器需要的——无 dispatch 管道、无 Provider、无每 token 的 Immer 代理开销；基于 `useSyncExternalStore`，React 19 并发安全。
 
+> **M4 的实际落地（有意偏差，不是遗漏）**：M4 只建了 `entity` + `ui` 两个 slice，`live` **留到 M6** —— 它是为流式渲染而生的（`buffers[turnId]`），M4 没有任何东西会往里面写，先建出来就是一份没有调用方的空壳。运行时的槽位/队列深度（`runtime:getState` 的数据）暂时**寄放在 `ui`**，M6 建 `live` 时一并搬走。`store/index.ts` 里留了一行注释写明这件事。
+
+两条 M4 踩到的 Zustand 5 纪律（都已写进代码注释）：
+
+1. **选择器返回新数组/新对象 = 无限重渲染。** `useStore((s) => s.projectsByWorkspace[id] ?? [])` 每次渲染都造一个新数组，被判成「变了」。修法是模块级的 `const EMPTY_PROJECTS: Project[] = []` 常量 —— 空值时返回**同一个引用**。
+2. **`Slice<T>` 的循环引用必须只发生在类型层。** slice 文件写 `import type { Slice } from './index'`，`import type` 会被擦掉，运行时的依赖环也就不存在了。
+
+**M4 的渲染层文件**（`src/renderer/src/`）：
+
+```
+App.tsx               组合 + 布局（含 Dialog 的唯一状态机：一次只开一个）
+store/{index,entity,ui}.ts
+hooks/usePushNotices.ts   app:notice 订阅（StrictMode 下订阅两次，必须返回 off）
+components/  Sidebar  WorkspaceSwitcher  WorkspaceDialog  WorkspaceOverview
+             ProjectList  AddProjectDialog  MemberList  MemberDetail
+             ActorManager  TopBar  NoticeBar  FirstRun
+             ui/{Button,Badge,Dialog,Field,Empty,Text}   ★ Text.tsx 是 M4 新增
+             mock/ConversationMock.tsx                   M0 视觉稿，M6 换真实流式渲染
+ipc.ts             预加载桥的类型化包装（unwrap：把失败信封翻成 IpcError）
+```
+
+两个值得记一笔的文件：
+
+- **`ui/Text.tsx`（M4 新增）**：`Em`（强调，四种色调）与 `PathText`（等宽、可选中的路径）。它存在是因为一个**反复踩到的坑**：JSX 里 `**粗体**` 和反引号**不会被解释**，会原样显示出来。文案纪律要求界面上出现「可见项目**不是**安全机制」这种强调，就必须靠组件而不是 Markdown 记号 —— 而**发往 `NoticeBar` 的纯文本字符串更没有 Markdown**（`NoticeBar` 只做 `whitespace-pre-line`）。M4 因此修掉了三处「通知里带着字面星号」的真实缺陷。
+- **首启空态显示不出真实的 `workspaces` 根目录**（`FirstRun.tsx` 有长注释）。这是**故意**的：`app.getPath('userData')` 会随应用名、打包方式、`--user-data-dir` 变，而此刻**没有任何通道**能问到它（`workspace:paths` 需要一个空间 id，而现在一个都还没有）。所以首启页只说「它在应用数据目录下的 `workspaces\` 里」，真实路径等第一个空间建出来后由概览页如实显示 —— **猜一个绝对路径贴上去**是最容易犯的错，它看起来更贴心，但会是错的。
+
 **避免每次 token 都重渲染整个列表**（这决定应用好不好用）：
 
 1. `<MessageList>` **只订阅 `order[sessionId]`**。该数组除非**增删消息**否则引用不变 → 列表在 token delta 时**完全不重渲染**
@@ -857,7 +916,7 @@ UI 上仍保留思考面板的位置（`message_event.kind='thinking'` 照常落
 | **M1** | ✅ **已完成** `node:sqlite` 证明。见 §2.1 五项实测结果。 | 五项全过，`M1 PASS`。持久化选型锁定 `node:sqlite`。 |
 | **M2** | ✅ **已完成** Schema + 迁移器 + 全部 repository。**含 `member_project` 与 `origin` 三值**（§8.4/§8.2）。 | 35 个用例全过（`node --test`，纯 Node 无 Electron，内存库）；迁移重跑幂等已验；`idx_member_router` / `idx_member_primary` 两条偏索引均已验「DB 而非应用层拒绝」。踩到的两个坑记入 §8.9。 |
 | **M3** | ✅ **已完成** IPC 契约：`registry.ts`、preload 桥、`shared/` 里的 zod schema。 | 调试点一次 `workspace:list` → `[]`。**实测见 §4.3a**：① 信封设计的必要性已用 `scripts/m3-ipc-error-probe.cjs` 在 Electron 44.4.3 上实证 —— 抛异常会丢掉 `code`/`detail`，连 message 都被套上 `Error invoking remote method '…'` 前缀；② 44 条 invoke 通道全部注册，6 条按里程碑 `defer`，漏一条 `seal()` 在启动时就抛；③ **86 个用例全过**（M2 的 35 个仍全绿 + 51 个新增），两个 tsconfig 项目 typecheck 干净。 |
-| **M4** | 工作空间/项目 CRUD、切换器、**三种导入方式**（§8.2）、成员可见性配置。 | 建空间；三种方式各加一个项目；`origin='local'` 的项目**删空间后目录仍在**；配置成员可见项目与主项目 |
+| **M4** | ✅ **已完成** 工作空间/项目 CRUD、切换器、**三种导入方式**（§8.2）、成员可见性配置，外加最小可用的角色库（含 `actor:setPersona`）。 | **138 个用例全过**（M3 的 86 个仍全绿 + 52 个新增），两个 tsconfig 项目 typecheck 干净。**实机走查 17 条断言全过**，见下方「M4 实证」。 |
 | **M5** | **`ClaudeAdapter`** + CLI 定位器：spawn、解析 stream-json、吐 `AgentEvent`、**`collectProjectContext`**（§8.5c）。 | 硬编码 prompt → 打印 text/thinking/tool delta。**四项必须在这里量**：① 冷启动时间与峰值 RSS（鲜进程 spawn 237MB 二进制，未实测）② **thinking_delta 是否真带文本**（§5.7 的降级决策依赖它）③ 是否出现 `system:compact_boundary` 事件（§5.3，若出现说明窗口算错了）④ **`--add-dir` 引入的 CLAUDE.md 与我们显式注入的是否重复**（§8.5c，用两个可区分标记字符串实测；**结论出来前不写去重逻辑**） |
 | **M6** | 事件持久化 + `event-batcher` + 流式 UI。 | 完整对话一轮后硬杀应用，重开 → 历史完整重放，含思考、工具、diff |
 | **M7** | `context-builder` + 消息数组化 + 压缩。 | 第 2 轮能正确引用第 1 轮；强制触发阈值，确认 `<summary>`+`<recent>` 替换原始历史；**确认 `usage.cache_read_input_tokens` 非零**——若恒为 0 则缓存策略失效，需排查前缀是否字节稳定（§4.6） |
@@ -877,6 +936,37 @@ UI 上仍保留思考面板的位置（`message_event.kind='thinking'` 照常落
    > Electron 44 的 `console-message` **首参即新式事件对象**，`level` 是字符串（`'info'|'warning'|'error'|'debug'`）；后面那些位置参数已标 deprecated，不要用。
 
 3. **electron-vite 默认不压缩渲染产物**（653kB / 14427 行可读源码）。已在 renderer 配置显式 `minify: 'esbuild'` → 229kB。
+
+---
+
+### M4 实证：实机走查（`scripts/m4-walkthrough.cjs`，2026-09-23）
+
+**为什么不是一个脚本截图、也不是「人点一遍然后描述看到什么」**：截图和描述都不可复核。M4 的走查用 **DevTools Protocol** 驱动**真实窗口里的真实 DOM** —— 点的是真正的按钮、读的是真正的文本，所以「界面上显示的是这句话」这件事可以被逐字复现。
+
+跑法（不需要装 Playwright/Puppeteer）：另开终端 `npm run dev` 提供 5173 上的渲染层，再用
+
+```
+electron.exe --remote-debugging-port=9222 --user-data-dir=<沙箱> .
+```
+
+起一个**独立实例**。沙箱 `userData` 自带一份库**和**一棵 `workspaces/` 根 —— 所以既证明「根目录跟着 userData 走」，又保证删空间删不到用户的真东西。（M3 的探针脚本同样是这个路子：不改产品代码来换取可观测性。）
+
+**17 条断言全过。** 关键几条与**磁盘侧**核对：
+
+| 验收标准 | 实证 |
+|---|---|
+| 建空间 | 通知逐字：「已建工作空间「Nova」／空间目录：`…\cc-m4\userdata\workspaces\Nova`（改名只会改显示名，不会移动这个目录）」 |
+| 三种方式各加一个项目 | 侧边栏三行分别显示徽标 `原地引用` / `复制` / `克隆`；clone 的详情里有「远端 `<本地裸仓库>`」与「分支 main」，copy 的详情里**没有**远端与分支（不编造） |
+| 复制跳过了什么 | 盘上核对：副目录有 `.git`、**没有 `node_modules`**（源目录里那个在）、`SENTINEL.txt` 与源逐字节一致 |
+| ★ `origin='local'` 删空间后目录仍在 | 哨兵 `SENTINEL.txt` 删前删后 **sha256 与 mtime 完全一致**（`7cf4671f…`，61 字节，`mtime=1790097648.179`）；整个 `src-proj` 树（`.git` / `node_modules` / `src`）原样 |
+| 副本按勾选被删 | 勾了「同时删除这 2 个副本目录」→ `copies/` 与 `clones/` 都空了；界面报告逐字：「项目副本：已删除 2 · 保留 1 · 本来就不在 0 · 删除失败 0」 |
+| 空间目录永不被删 | 报告逐字：「空间目录仍在磁盘上：`…\userdata\workspaces\Nova`」；盘上 7 项（`blobs` `index` `logs` `memory` `projects` `scratch` `workspace.json`）齐全 |
+| 配成员可见性与主项目 | 收窄 →「当前：只可见 1 个项目」；取消最后一个勾 → **被拒绝**，提示逐字「不能把勾全部取消…」；主项目标记出现在侧边栏 |
+| 三条文案纪律 | 逐字断言通过：写了 shell、「能静态判定的路径是硬的，动态构造的不是」、**没有**把黑名单说成「安全」、「将在下一轮生效」、没有只读模式 |
+
+**走查发现的一个真实缺陷**（已修，记入 §8.8c 规则七）：删掉**最后一个**工作空间时，界面切到首启空态，而那个布局分支**没有渲染 `NoticeBar`** —— 最要紧的删除报告一个字都没露过面。
+
+**一个仍然存在的边界**：copy 与 clone 没有进度、不能取消（§8.2a / §8.9-8）。走查里的本地裸仓库很小，所以这一项**没有被真正压测**。
 
 ---
 
@@ -906,6 +996,8 @@ ELECTRON_RUN_AS_NODE=1 npx --yes electron@44.4.3 -e \
 12. **孤儿**：任务管理器中确认无残留 `claude.exe`
 
 **单测覆盖**（纯 Node，无 Electron）：schema 迁移幂等性 · 上下文装配（摘要/压缩/剔除推理）· stream-json 解析器（含非 JSON 行、缺失 `result` 字段）· 跳数控制 · mention 结构化解析。
+
+> **M4 补上的实机验证手法**（§六「M4 实证」，此后每个里程碑沿用）：不装 Playwright/Puppeteer，也不改产品代码去开调试开关 —— 而是用 `--remote-debugging-port` + `--user-data-dir=<沙箱>` 起一个**独立实例**，用 DevTools Protocol 在**真实窗口里点真实按钮**。三点好处：① 断言可逐字复现，不是「我看到了」；② 沙箱 `userData` 自带一份库**和**一棵 `workspaces/` 根，删空间删不到用户的东西；③ 走查脚本（`scripts/m4-walkthrough.cjs`）留在仓库里，和 `scripts/m3-ipc-error-probe.cjs` 一样是**证据**而不是一次性动作。
 
 ---
 
@@ -948,11 +1040,36 @@ ELECTRON_RUN_AS_NODE=1 npx --yes electron@44.4.3 -e \
 | 加入一个**客服/总览**角色，同时看到前后端，全面回答 | 一个角色要看多个项目 | `is_primary` 留空 → cwd = 空间 `scratch/`；**但必须拿得到各项目的持久化上下文** → §8.5 的 `collectProjectContext` |
 | 开发新项目时导入一个**参考项目**，只在新项目改 | 引用项目无需只读 | 两个 `member_project` 行，`is_primary` 指向新项目；参考项目**可见但不只读**（见 §8.4） |
 
+#### 8.2a M4 落地细节（实现补记）
+
+**方式 2（复制）**：
+
+- 用 `fs.cp(src, dst, { recursive: true, filter })`。过滤器按**目录 basename** 匹配一张**具名导出**的清单 —— `src/shared/copy-policy.ts` 的 `COPY_SKIP_DIRS`：`node_modules` `.venv` `venv` `__pycache__` `dist` `build` `.next` `.turbo` `.cache` `target` `coverage`。抽成具名导出是为了**可审阅、可测试**，也让 UI 与主进程读同一份。
+- **`.git` 保留**：历史拷不出来的，丢了就是丢了。
+- 匹配的是**目录名**，任意深度，所以一个叫 `build` 的**脚本文件**不会被跳过。
+- ★ **这张清单必须显示给用户**（「会跳过：node_modules、dist…」）—— 跳过什么是静默的，那就变成了「复制的副本和原件不一样而你不知道」。
+- 目标已存在且非空 → `E_CONFLICT`；**目标在源里面 → `E_INVALID_PAYLOAD`**（否则递归复制自己）。
+- `remoteUrl` / `defaultBranch` **留 `null`**：我们没跟任何远端说过话，猜一个是编造。
+
+**方式 3（clone）**：
+
+- **完整克隆，不加 `--depth`** —— 浅克隆会让 agent 看不到历史，而这是它最常用的上下文之一。
+- `execFile` + **`shell: false`**：URL 与路径走 argv，不拼命令串。
+- 环境里加 `GIT_TERMINAL_PROMPT=0`。理由：终端提示符在 GUI 里**看不见会挂死**；而凭据管理器（GCM）不走终端提示，私有仓库照常能用。**不清空用户全局 git 配置** —— 用的是用户本机的 git，他的 proxy / 凭据 / autocrlf 理应生效。
+- 成功后读当前分支填 `defaultBranch`，`remoteUrl` 就是用户给的 URL。
+- 父目录不存在先 `mkdir -p`。
+
+**两者共同的失败纪律**：失败后**尽力回收**半成品目录；回收不掉就把路径如实告诉用户，不假装干净。落库失败同理。
+
+**⚠️ M4 的诚实边界（写在这里，别让它变成隐藏的假设）**：copy 与 clone **都没有进度、都不能取消**。跳过 `node_modules` 之后复制通常很小，但这不是保证 —— 一个很大的仓库会让窗口安静地等很久。这条记进 §8.9。
+
 ### 8.3 目录布局
 
+**根目录（M4 定的）**：`workspaceRoot = app.getPath('userData')/workspaces/` —— 与数据库**同一个笼子**。理由是它跟着用户配置文件走，不与「文档」混乱；代价是它在资源管理器里**用户看不见**，所以 UI 必须如实显示真实路径并给一个「在资源管理器中打开」（§8.3a）。
+
 ```
-<workspaceRoot>/<空间名>/
-  workspace.json      空间清单：成员、角色可见性、设置（**不含项目路径的权威副本**）
+<workspaceRoot>/<dir_name>/
+  workspace.json      铭牌：只写身份，**不写会变的东西**（见 §8.3a）
   memory/             角色级 / 会话级记忆（Markdown，人可读可 diff）
   index/              FTS / 向量索引（可重建）
   blobs/              大文本外置（§5.8）
@@ -968,6 +1085,36 @@ ELECTRON_RUN_AS_NODE=1 npx --yes electron@44.4.3 -e \
 > 「我需要通过提示词或者其他方式，告诉 llm 我 ws 下有哪些项目目录，能看到哪些，**而不是说 ws 目录下就是 project**」
 
 这正是 §8.5 把「项目发现」从**文件系统遍历**改为**显式注入**的原因。
+
+#### 8.3a M4 落地细节（含两处对本文档的**修订**）
+
+**① 目录名（`dir_name`）创建时定死，改名不动目录。**
+
+`workspace` 表加一列 `dir_name`（迁移 `0002`），**不再从名字实时推导**。理由：目录名要稳定。
+
+净化规则（`infra/space-dir.ts`，**纯函数、可穷举测试**）：去掉 `<>:"/\|?*` 与控制字符；去尾部点与空格；避开 `CON`/`PRN`/`NUL`/`COM1-9`/`LPT1-9` 这些 Windows 保留名；截断到 64 字符；净化后为空 → `space`。**中文原样保留**（Windows 支持 Unicode）。撞名由 `pickDirName()` 加序号：`Nova → Nova-2 → Nova-3`，并有 `UNIQUE INDEX idx_workspace_dir_name` 在 DB 层兜底（handler 再预检一次只为给人话）。
+
+**改名（`workspace:update`）只改显示名。** 三条理由，缺一条都不够：
+
+1. `<空间>/projects/` 是 clone/copy 的**默认落点**，移动空间目录会让那些项目的绝对 `root_path` 全部失效；
+2. M5 起 agent 的 cwd 就在这棵树下，而 **Windows 拒绝重命名有进程占用的目录**；
+3. 半途失败的 rename 会让 DB 与磁盘不一致。
+
+代价是：用户在资源管理器里看到的目录名和界面上显示的名字**可能不同**。所以 UI 上必须显示真实路径 —— `WorkspaceDialog` 里那句「目录名是「Nova」，**改名不会移动它**」就是这条的落点。
+
+**② `workspace.json` 只写铭牌 —— 这是对本文档上一版那句话的修订。**
+
+上一版写它是「成员、角色可见性、设置的清单」。**M4 不镜像成员与可见性**，因为它会变成一个**会悄悄过期的第二事实源**（而本文档自己也说了「冲突时以 DB 为准」）。实际写入的就四样：
+
+```json
+{ "format": 1, "id": "…", "name": "Nova", "dirName": "Nova", "createdAt": 1790098457290, "_note": "…权威数据在 SQLite…本文件只是给人看的铭牌…" }
+```
+
+改名时重写它（只改 `name`）。完整的导出物（含成员与可见性）记进 §8.9。
+
+**③ 建空间即落地。** `workspace:create` **当场 mkdir 整棵树**（7 项）并写铭牌，而不是等第一次用到它。顺序是：先建目录 → 再插 DB 行；顺序反过来会在建目录失败时留下一条指向不存在目录的记录，而先建目录失败时只要**不插行**就行。插行失败则尽力删掉刚建的目录，删不掉就**如实报告路径，不假装干净**。
+
+**④ `scratch/` 由 M4 建出来，M5 才用**（§8.5b 的三级兜底 cwd）。空目录留着是有意的。
 
 **先例**：VS Code `.code-workspace`（清单 + 相对路径，不搬动成员目录，最接近本设计）；Vibe Kanban（一个 workspace 含多仓库，agent 工作目录按 session 记 `agent_working_dir`）；Conductor v0.25.0 把工作空间从仓库内 `.conductor/` 搬到 `~/conductor/workspaces/`，**理由正是避免污染每个项目的 gitignore** —— 与用户诉求同源。
 > 置信度：以上为搜索摘要二手来源（调研 agent 的 WebFetch 被全域名拦截，未能打开任何一手文档）。方向可信，细节待核。
@@ -1138,7 +1285,37 @@ M6 的 `event-batcher` 要把「追加消息 + 追加事件 + 推进 seq」打�
 **附带定的两个 M3 决策**（写在这里免得日后当成既成事实）：
 
 - **`Session` 在 `member:create` 里创建**（同一事务）。理由：session 与成员 1:1，而通道清单里**没有 `session:create`** —— 它的诞生点只能在「成员诞生」这一处。若 M5 的调度器要改成惰性创建，需要先加通道。
-- **`workspaceRoot` 未定位置**，所以 `src/main/infra/paths.ts` 只有 `dbPath()` 与 `blobsRoot()`。§8.3 只写了 `<workspaceRoot>/<空间名>/`，没写根本身在哪。刻意**不**先猜一个 —— 它决定用户的文件出现在哪，留到 M4 的导入流程里定。
+- ~~**`workspaceRoot` 未定位置**，所以 `src/main/infra/paths.ts` 只有 `dbPath()` 与 `blobsRoot()`。~~ ✅ **M4 已定**：`app.getPath('userData')/workspaces/`（§8.3），`paths.ts` 现有 `workspacesRoot()`。当时刻意不猜是对的 —— 它决定用户的文件出现在哪。
+
+### 8.8c M4 实现纪律：三条规则
+
+**规则五：宿主能力（对话框 / 文件管理器 / 根目录 / git 定位）走**注入**，不让 registry 碰 electron。**
+
+`registry.ts` 的不变量是「**不 import electron**」，靠它，`test/ipc/` 才能把整条 IPC 路径在**裸 Node** 下跑完。而 `dialog.showOpenDialog` / `shell.openPath` / `app.getPath('userData')` 会打破它，所以照 M3 注入 `now`/`newId` 的同一套手法扩一个袋子：
+
+```ts
+export interface SysCapabilities {
+  pickPath(o: { mode: 'file'|'directory'; title?: string; defaultPath?: string }): Promise<string|null>
+  revealPath(path: string): Promise<boolean>
+  workspacesRoot(): string
+  locateGit(): Promise<string|null>
+}
+export interface HandlerContext { store; now(); newId(); view; sys: SysCapabilities }
+```
+
+实现落在 `src/main/ipc/system-capabilities.ts`（**唯一允许 import electron 的 IPC 文件**）；`context.ts` 改成 `createContext(store, sys)`，自己不 import electron。测试注入固定实现：`pickPath` 返回预设路径、`workspacesRoot` 返回临时目录、`locateGit` 可返回 `null`（用来验「找不到 git」的人话错误）。
+
+> **能力边界要说实话**：`shell:revealPath` 让渲染侧能要求主进程打开**任意路径**。这不是新攻击面 —— 渲染进程是我们自己的代码，而 agent 是**另一个进程、够不着 IPC**。这句话写进了代码注释，不要含糊过去。
+
+**规则六：凡是主进程能自己算的 hash，一律主进程算。**
+
+渲染侧**没有文件系统**。旧契约却要求它传 `personaHash` / `roleDescHash`，那是不可能履行的；`member:create` 更是收下 `roleDescPath` 而把 hash 落成 NULL。M4 统一成 `handlers/file-hash.ts` 的 `readHashedFile(path)`（sha256），四条路径共用（§4.3）。
+
+**规则七：全应用唯一的错误出口，必须在**每一个**布局分支里都渲染得出来。**
+
+这条是**实机走查发现的真实缺陷**，不是假想：删掉**最后一个**工作空间时，界面立刻切到首启空态，而首启空态那个分支**没有渲染 `NoticeBar`** —— 于是「副本删了几个、哪些没删掉、空间目录还留在哪」这条报告一个字都没露过面。而它恰好是整个 M4 最要紧的一句交代（§8.2 的删除纪律）。
+
+修法是首启分支也渲染提示条（浮在右上角）。**教训比修法重要**：一个「全局唯一出口」的组件，只要有任何一个提前 `return` 的布局分支漏掉它，它就不是全局的 —— 而漏掉的那个分支，往往正是最需要它的那个（出错后回到空态）。
 
 ### 8.9 待办
 
@@ -1147,4 +1324,12 @@ M6 的 `event-batcher` 要把「追加消息 + 追加事件 + 推进 seq」打�
 2. ~~§4.2 DDL 同步~~ ✅ 已完成：`member_project` 已加入、`working_paths_json` 已移除、`project.origin` 已扩为三值。
 3. **M5 的两个未知项待实测**：`--add-dir` 的 CLAUDE.md 是否与显式注入重复（§8.5c）；thinking_delta 是否带正文（§5.7）。
 4. **§5.5a 的缺口需要产品决策**：默认自主模式下，混淆 shell 命令可绕过 deny 列表。若要闭合，唯一完整手段是 **PreToolUse hook**（§5.5a 表）。阶段一不做，但需在 UI 上以准确措辞呈现（"能静态判定的路径是硬的"），不要把 deny 列表说成"安全"。
+
+**M4 带出来的待办**：
+
+5. **空间目录的孤儿回收**。删空间**不删空间目录本身**（§8.3a），所以盘上会留下 `Nova`、`Nova-2`…… 与 `userData/blobs/` 的 GC（M10）是同一类问题，应当一起做：扫描 `workspaces/` 下没有对应 DB 行的目录，**列出来让用户决定**，不要自动删 —— 那里面可能有他手动放的东西。
+6. **`workspace.json` 的完整导出**。M4 只写铭牌（§8.3a）。若日后要做「导出空间 / 迁移到另一台机器」，需要一个**显式触发**的完整导出（含成员与可见性），而**不能**回流成「启动时镜像」—— 那正是 M4 拒绝它的理由（第二事实源会过期）。
+7. **copy 的跳过清单可以更聪明**（现在是固定启发式，**不看 `.gitignore`**）。看着 `.gitignore` 跳过更贴合用户预期，但要处理：没有 `.gitignore` 时怎么办、嵌套的 `.gitignore`、以及**被 ignore 的目录里可能有用户真的要的文件**。不是明显改进，需要实测。
+8. **copy / clone 没有进度条、不能取消**（§8.2a）。一个很大的仓库会让窗口安静地等很久。修法是长任务 + 推送进度，属于 M6 之后的事。
+9. **`blobs/` 的位置有矛盾要收口**：§8.3 的目录树把 `blobs/` 画在**空间目录里**，而 `paths.ts` 的 `blobsRoot()` 是 **`userData/blobs/<workspaceId>/`**（M6/M10 才写）。两者只能留一个，等 blob-store 真正落地时定。
 5. **启动期的 `turn.reapOrphans()` 尚未接线**（§4.4）。`turn-repo.reapOrphans` 已就位、已有用例，但 `src/main/index.ts` 刻意没调它 —— 孤儿清扫连同 `taskkill` 记录的 PID 是 **M10** 的整块工作，M3 不做以免里程碑边界模糊。**在那之前，硬杀应用会留下 `status='running'` 的僵尸轮次**，这是已知且已接受的中间状态。

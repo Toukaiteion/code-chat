@@ -22,11 +22,15 @@ import { expectFail, harness, makeActor } from './helpers.ts'
 
 test('真实的主键冲突 → E_CONFLICT（实测 errcode 1555）', () => {
   const store = openStore(':memory:')
-  store.repos.workspace.create({ id: 'w1', name: 'A', now: 1 })
+  // ⚠️ `dirName` 必须显式给且**互不相同**。迁移 0002 加了
+  // `UNIQUE INDEX ON workspace(lower(dir_name))`，而默认 `dirName ?? id`
+  // 会让两行的 dir_name 一样 —— 于是先撞上的是那个唯一索引（2067），
+  // 这条用例就从「主键冲突」悄悄变成了「唯一索引冲突」。显式区分才是它想测的东西。
+  store.repos.workspace.create({ id: 'w1', name: 'A', dirName: 'dir-a', now: 1 })
 
   let caught: unknown
   try {
-    store.repos.workspace.create({ id: 'w1', name: '重复的 id', now: 2 })
+    store.repos.workspace.create({ id: 'w1', name: '重复的 id', dirName: 'dir-b', now: 2 })
   } catch (err) {
     caught = err
   }
@@ -156,14 +160,11 @@ test('handler 层的语义翻译：同一个 UNIQUE 违约，得到的是人话�
   const h = harness()
   await makeActor(h, 'Atlas')
 
-  // 撞的是 actor.name 的 UNIQUE，但用户看到的是「已经有一个叫 Atlas 的角色了」
+  // 撞的是 actor.name 的 UNIQUE，但用户看到的是「已经有一个叫 Atlas 的角色了」。
+  // 注意这里**故意给一个不存在的 personaPath** —— 重名检查在**读文件之前**，
+  // 所以先被报出来的是重名。顺序反过来的话，用户会先去修一个根本不是问题的文件。
   const error = expectFail(
-    await h.call('actor:create', {
-      name: 'Atlas',
-      model: 'm',
-      personaPath: 'p',
-      personaHash: 'h'
-    })
+    await h.call('actor:create', { name: 'Atlas', model: 'm', personaPath: '不存在的文件.md' })
   )
   assert.equal(error.code, 'E_CONFLICT')
   assert.match(error.message, /已经有一个叫「Atlas」的角色了/)
@@ -173,10 +174,10 @@ test('handler 层的语义翻译：同一个 UNIQUE 违约，得到的是人话�
   // 这里用真实的唯一违约触发一次 —— 同一个 actor 名字在实体层已挡住，
   // 所以直接对 repository 造成的冲突走 `toEnvelope`。
   const store = h.store
-  store.repos.workspace.create({ id: 'w-dup', name: 'A', now: 1 })
+  store.repos.workspace.create({ id: 'w-dup', name: 'A', dirName: 'dir-x', now: 1 })
   let caught: unknown
   try {
-    store.repos.workspace.create({ id: 'w-dup', name: 'A', now: 2 })
+    store.repos.workspace.create({ id: 'w-dup', name: 'A', dirName: 'dir-y', now: 2 })
   } catch (err) {
     caught = err
   }

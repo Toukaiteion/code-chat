@@ -28,14 +28,22 @@ export function blobsRoot(): string {
   return join(userData(), 'blobs')
 }
 
-// ─────────────────────────────────────────────────────────────
-// 尚未落地
-//
-// §8.3 的 `<workspaceRoot>/<空间名>/` 布局里，**`workspaceRoot` 本身在文档里
-// 没有定位置**（只写了它下面是 `<空间名>/`）。M3 也不需要它 —— 本里程碑
-// 不通文件系统，`project:addLocal` 只校验用户给的那个目录。
-//
-// 刻意**不**在这里先猜一个（`documents/code-chat` 还是 `userData/workspaces`），
-// 因为那会变成一个「设计文档没写、代码里却已经定了」的既成事实，
-// 而它关系到用户的文件会不会出现在他预期的位置。留到 M4 的导入流程里定。
-// ─────────────────────────────────────────────────────────────
+/**
+ * ★ §8.3 的 `<workspaceRoot>` —— **M3 刻意留空、M4 定下来的那个决定**。
+ *
+ * `userData/workspaces/`，与 DB 同一个笼子。备选是 `app.getPath('documents')/code-chat`，
+ * 权衡后没选：clone/copy 的默认落点 `<空间>/projects/`（§8.3）里装的是**真实的代码**，
+ * 而 `Documents` 下多一棵树会混进用户自己的文档管理（同步盘、备份工具、搜索索引），
+ * 且用户对这个应用的预期是「数据都在 AppData 里」——与已经在那里落了户的 DB、blobs 一致。
+ *
+ * 代价说清楚（**不是安全决定**，§8.4 的边界声明）：
+ * 这个位置在资源管理器里默认不可见，所以 UI **必须**显示真实路径，
+ * 并提供「在资源管理器中打开」。这不是把东西藏起来当安全措施 ——
+ * agent 有 shell，能读到 userData；我们不假装能解决它。
+ *
+ * ⚠️ 拼空间路径**不要**在这里做 —— 用 `space-dir.ts` 的 `spacePaths()`。
+ * 它不 import electron，所以能被测到（净化目录名那段逻辑尤其需要）。
+ */
+export function workspacesRoot(): string {
+  return join(userData(), 'workspaces')
+}

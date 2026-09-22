@@ -1,5 +1,6 @@
 import type { HandlerContext, Registry } from '../registry.ts'
 import { AppError, NotFoundError } from '../errors.ts'
+import { readHashedFile } from './file-hash.ts'
 
 /**
  * `Actor` 是**全局的「人」**（§2.4）：跨空间复用，不因空间而复制。
@@ -14,19 +15,26 @@ export function registerActor(r: Registry, ctx: HandlerContext): void {
   /** 返回 `null` 而不是抛 —— 「查一个不存在的 id」是查询的正常结果，不是异常。 */
   r.handle('actor:get', ({ id }) => repos.actor.get(id))
 
-  r.handle('actor:create', ({ name, model, personaPath, personaHash, avatar, agentKind, effort }) => {
+  /**
+   * ★ M4 起 `personaHash` 由**主进程**读文件算出（`readHashedFile`）。
+   *
+   * M3 的契约要求调用方传这个 hash —— 而调用方是渲染进程，**它没有 fs**，
+   * 根本读不到那个文件，只能编一个。现在调用方只给人设文件的路径。
+   */
+  r.handle('actor:create', async ({ name, model, personaPath, avatar, agentKind, effort }) => {
     // `actor.name` 有 UNIQUE 约束。先查再插只为给一句人话：
     // 直接吃 2067 得到的是「UNIQUE constraint failed: actor.name」。
     const dup = repos.actor.getByName(name)
     if (dup) {
       throw new AppError('E_CONFLICT', `已经有一个叫「${name}」的角色了`, { actorId: dup.id })
     }
+    const persona = await readHashedFile('人设文件', personaPath)
     return repos.actor.create({
       id: ctx.newId(),
       name,
       model,
-      personaPath,
-      personaHash,
+      personaPath: persona.path,
+      personaHash: persona.hash,
       avatar,
       agentKind,
       effort,
@@ -35,12 +43,8 @@ export function registerActor(r: Registry, ctx: HandlerContext): void {
   })
 
   /**
-   * 更新「人」的本身属性。**不含** `personaPath` / `personaHash`。
-   *
-   * 人设文件的重新选择**没有通道**（`actor-repo.setPersona` 已就位，但没有 `actor:setPersona`）——
-   * 它涉及读文件、算 hash、以及「改了人设要不要重算缓存前缀」（§4.6），
-   * 属于 M4 的界面工作。在那之前，本通道刻意不碰这两列：
-   * 混在一起会让「只改个模型」的操作顺带把 hash 抹成空。
+   * 更新「人」的本身属性。**刻意不含** `personaPath` / `personaHash` ——
+   * 换人设走 `actor:setPersona`。混在一起会让「只改个模型」的操作顺带把 hash 抹成空。
    */
   r.handle('actor:update', ({ id, name, model, effort, agentKind, avatar }) => {
     const current = repos.actor.get(id)
@@ -61,6 +65,19 @@ export function registerActor(r: Registry, ctx: HandlerContext): void {
       avatar,
       now: ctx.now()
     })
+    if (!updated) throw new NotFoundError('角色', id)
+    return updated
+  })
+
+  /**
+   * 换人设文件（§4.6）。**路径与 hash 必须一起动** —— 内容变了却不更新 hash，
+   * 会让「可缓存前缀」的检测失效：缓存键会认为前缀没变，而它变了。
+   * `actor-repo.setPersona` 的注释同此。两条都由主进程一次算好，调用方无从搞错。
+   */
+  r.handle('actor:setPersona', async ({ id, personaPath }) => {
+    if (!repos.actor.get(id)) throw new NotFoundError('角色', id)
+    const persona = await readHashedFile('人设文件', personaPath)
+    const updated = repos.actor.setPersona(id, persona.path, persona.hash, ctx.now())
     if (!updated) throw new NotFoundError('角色', id)
     return updated
   })

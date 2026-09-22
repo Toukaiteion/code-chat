@@ -64,6 +64,8 @@ export const MentionSchema = z.object({
 export const WorkspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
+  /** 空间目录的**单段名字**（§8.3）。改名不动它 —— 见 `entities.ts` 的说明。 */
+  dirName: z.string(),
   activeProjectId: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -274,6 +276,41 @@ export const AppNoticeSchema = z.object({
 
 const Deleted = z.object({ deleted: z.boolean() })
 
+/**
+ * 一个副本目录的处置结果。
+ *
+ * ★ **四种状态必须都能表达**：「真删掉了」「本来就不在」「按用户的意思没删」
+ * 「想删但没删掉」是**四件不同的事**。把它们压进一个布尔值，UI 就只能猜
+ * —— 而这里动的是用户的真实目录，猜错一次就是数据没了或以为没了。
+ *
+ * `state` 的四个值：
+ * - `removed` 本次真的从磁盘上删掉了；
+ * - `absent`  动手之前就不在磁盘上（不是错误，也不是「我们删的」）；
+ * - `kept`    用户没要求删（或这是 `local` 型，我们**永不**碰）；
+ * - `failed`  想删，没删掉。`reason` 必须有人话。
+ */
+const CopyRemoval = z.object({
+  path: z.string(),
+  state: z.enum(['removed', 'absent', 'kept', 'failed']),
+  reason: z.string().nullable()
+})
+
+/**
+ * 删除类操作的共同形状：**删了什么、什么没删掉、剩下什么，都要能说清**。
+ * 只回一个布尔值的删除通道，UI 就只能猜。
+ */
+const DeleteReport = z.object({
+  deleted: z.boolean(),
+  copies: z.array(CopyRemoval),
+  /**
+   * 空间目录本身。**任何情况下都不删**（见 `handlers/workspace.ts` 的四条理由）。
+   * 如实告诉用户它留在哪 —— 用户选了 `userData` 这个资源管理器里看不见的位置，
+   * 「东西还在，在这里」是我们欠他的交代。行不存在时是 `null`。
+   */
+  workspaceDir: z.string().nullable(),
+  workspaceDirExists: z.boolean()
+})
+
 export const INVOKE_SCHEMAS = {
   // ── workspace ──────────────────────────────────────────────
   'workspace:list': { req: NoPayload, res: z.array(WorkspaceSchema) },
@@ -282,10 +319,42 @@ export const INVOKE_SCHEMAS = {
     req: z.object({ id: z.string(), name: z.string().min(1) }),
     res: WorkspaceSchema
   },
-  'workspace:delete': { req: z.object({ id: z.string() }), res: Deleted },
+  'workspace:delete': {
+    req: z.object({
+      id: z.string(),
+      /**
+       * §8.2：`copy`/`clone` 的副本「**提示后**删除」。默认 `false` —— 保守那一侧。
+       * `origin='local'` 的目录**无论这个标志传什么都不动**。
+       */
+      deleteCopies: z.boolean().optional()
+    }),
+    res: DeleteReport
+  },
   'workspace:setActive': {
     req: z.object({ id: z.string(), projectId: z.string().nullable() }),
     res: WorkspaceSchema
+  },
+  'workspace:paths': {
+    req: z.object({
+      id: z.string(),
+      /**
+       * `true` 时**顺带把这棵目录建出来**（`mkdir -p` + 补写铭牌），返回的 `exists` 就是 `true`。
+       *
+       * ★ 为什么要有这个显式开关：M4 之前的空间在磁盘上**根本没有目录**
+       * （那时还不通文件系统，`dir_name` 是迁移回填的 id）。所以「看路径」这个查询
+       * 对老数据会返回一个不存在的路径。把「建目录」藏在查询里是**不可接受的**
+       * —— 一个叫 `paths` 的通道不该在你只是看一眼的时候改磁盘。
+       * 于是让调用方显式说要建，默认不建。
+       */
+      ensure: z.boolean().optional()
+    }),
+    res: z.object({
+      rootPath: z.string(),
+      projectsPath: z.string(),
+      scratchPath: z.string(),
+      /** 目录此刻是否真的在磁盘上。`false` 时 UI 该说「目录不存在」而不是显示一个假路径。 */
+      exists: z.boolean()
+    })
   },
 
   // ── project ────────────────────────────────────────────────
@@ -313,21 +382,48 @@ export const INVOKE_SCHEMAS = {
     }),
     res: ProjectSchema
   },
+  /**
+   * 默认落点 = `<空间目录>/projects/<项目名>`（§8.3）。
+   * 只算路径，**不建目录、不碰磁盘** —— 用户还能改。
+   */
+  'project:defaultTarget': {
+    req: z.object({ workspaceId: z.string(), name: z.string().min(1) }),
+    res: z.object({ path: z.string() })
+  },
   'project:rename': {
     req: z.object({ id: z.string(), name: z.string().min(1) }),
     res: ProjectSchema
   },
-  'project:remove': { req: z.object({ id: z.string() }), res: Deleted },
+  'project:remove': {
+    req: z.object({
+      id: z.string(),
+      /** 同 `workspace:delete`：只对 `copy`/`clone` 生效，`local` 永不碰。默认 false。 */
+      deleteCopy: z.boolean().optional()
+    }),
+    res: z.object({
+      deleted: z.boolean(),
+      /**
+       * 副本目录的处置。`null` = 没这个项目（删除本来就是 no-op）。
+       * `origin='local'` 时是 `state: 'kept'` 且带上原因 —— 让 UI 有话说，
+       * 而不是让用户以为「勾了删除却什么都没发生」。
+       */
+      copy: CopyRemoval.nullable()
+    })
+  },
 
   // ── actor ──────────────────────────────────────────────────
   'actor:list': { req: NoPayload, res: z.array(ActorSchema) },
   'actor:get': { req: z.object({ id: z.string() }), res: ActorSchema.nullable() },
+  /**
+   * ★ M4 移除了 `personaHash`：**渲染侧算不出文件 hash**（它没有 fs），
+   * 要求调用方传等于要求它编一个。现在主进程读文件并算（`infra/file-hash.ts`）。
+   */
   'actor:create': {
     req: z.object({
       name: z.string().min(1),
       model: z.string().min(1),
+      /** 人设文件（Markdown）。它是这个角色 system prompt 的主体（§4.6）。 */
       personaPath: z.string().min(1),
-      personaHash: z.string(),
       avatar: z.string().nullable().optional(),
       agentKind: z.enum(AGENT_KINDS).optional(),
       effort: z.enum(EFFORT_LEVELS).optional()
@@ -343,6 +439,11 @@ export const INVOKE_SCHEMAS = {
       agentKind: z.enum(AGENT_KINDS),
       avatar: z.string().nullable().optional()
     }),
+    res: ActorSchema
+  },
+  /** 重选人设文件。hash 同样由主进程算 —— 改了人设等于改了缓存前缀（§4.6）。 */
+  'actor:setPersona': {
+    req: z.object({ id: z.string(), personaPath: z.string().min(1) }),
     res: ActorSchema
   },
   'actor:remove': { req: z.object({ id: z.string() }), res: Deleted },
@@ -366,12 +467,9 @@ export const INVOKE_SCHEMAS = {
     req: z.object({ id: z.string(), enabled: z.boolean() }),
     res: WorkspaceMemberSchema
   },
+  /** 同 `actor:setPersona`：hash 由主进程算，调用方只给路径。传 null 表示清空。 */
   'member:setRoleDesc': {
-    req: z.object({
-      id: z.string(),
-      roleDescPath: z.string().nullable(),
-      roleDescHash: z.string().nullable()
-    }),
+    req: z.object({ id: z.string(), roleDescPath: z.string().nullable() }),
     res: WorkspaceMemberSchema
   },
   'member:setRouter': {
@@ -463,6 +561,21 @@ export const INVOKE_SCHEMAS = {
   },
   'turn:get': { req: z.object({ id: z.string() }), res: TurnSchema.nullable() },
   'turn:listLive': { req: NoPayload, res: z.array(TurnSchema) },
+
+  // ── 宿主能力（对话框 / 文件管理器）──────────────────────────
+  'dialog:pickPath': {
+    req: z.object({
+      mode: z.enum(['file', 'directory']),
+      title: z.string().optional(),
+      defaultPath: z.string().optional()
+    }),
+    /** 用户取消 → `{ path: null }`。**取消不是错误**，别用失败信封表示它。 */
+    res: z.object({ path: z.string().nullable() })
+  },
+  'shell:revealPath': {
+    req: z.object({ path: z.string().min(1) }),
+    res: z.object({ opened: z.boolean() })
+  },
 
   // ── view / stream / runtime ────────────────────────────────
   'view:setActive': {

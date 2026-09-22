@@ -14,6 +14,7 @@ import { registerSession } from './session.ts'
 import { registerMessage } from './message.ts'
 import { registerTurn } from './turn.ts'
 import { registerMisc } from './misc.ts'
+import { registerSystem } from './system.ts'
 
 export function registerAll(r: Registry, ctx: HandlerContext): void {
   registerWorkspace(r, ctx)
@@ -24,6 +25,7 @@ export function registerAll(r: Registry, ctx: HandlerContext): void {
   registerMessage(r, ctx)
   registerTurn(r, ctx)
   registerMisc(r, ctx)
+  registerSystem(r, ctx)
 
   // ───────────────────────────────────────────────────────────
   // 尚未实现 —— **不填桩，返回 E_NOT_IMPLEMENTED 并带上里程碑号**。
@@ -35,10 +37,6 @@ export function registerAll(r: Registry, ctx: HandlerContext): void {
   // 这些通道的**入站载荷依然过 zod**（registry 的校验在实现检查之前），
   // 所以 UI 连「参数写错了」都能在 M5 之前先发现。
   // ───────────────────────────────────────────────────────────
-
-  // 要动文件系统与 git，且有「拷到哪 / clone 到哪」的冲突处理 —— M4。
-  r.defer('project:copy', 'M4', '复制导入：需要目录复制与冲突处理')
-  r.defer('project:clone', 'M4', 'git clone 导入：需要调用 git 并处理网络失败')
 
   // 需要调度器（§4.5：Semaphore + 每 session FIFO 队列 + 持久化排队）。
   r.defer('turn:send', 'M5/M6', '需要 ClaudeAdapter 与调度器；伪造 turnId 会让 UI 渲染一条永不运行的轮次')

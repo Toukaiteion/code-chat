@@ -56,7 +56,12 @@ export function projectRepo(db: DatabaseSync) {
     rename: db.prepare(`UPDATE project SET name = ? WHERE id = ? RETURNING *`),
     remove: db.prepare(`DELETE FROM project WHERE id = ?`),
     /** 孤儿检测用：本项目是否还被某个空间当作 cwd 兜底（§8.5b） */
-    referencedAsActive: db.prepare(`SELECT COUNT(*) AS c FROM workspace WHERE active_project_id = ?`)
+    referencedAsActive: db.prepare(`SELECT COUNT(*) AS c FROM workspace WHERE active_project_id = ?`),
+    /**
+     * **全库**的 `origin='local'` 根目录（**不按空间过滤**）。
+     * 见下面 `localRootPaths()` 的说明 —— 这个「不按空间过滤」正是要点。
+     */
+    allLocalRoots: db.prepare(`SELECT root_path FROM project WHERE origin = 'local'`)
   }
 
   return {
@@ -114,6 +119,19 @@ export function projectRepo(db: DatabaseSync) {
     isReferencedAsActive(id: string): boolean {
       const row = s.referencedAsActive.get(id) as { c: number }
       return Number(row.c) > 0
+    },
+
+    /**
+     * **全部**`origin='local'` 项目的根目录（跨空间，不去重）。
+     *
+     * ★ 传回全库而不是某个空间的，是这里唯一要紧的决定。
+     * 用途是删副本前的最后一道闸：如果待删目录是**任何一个** `local` 项目的祖先，
+     * 就拒绝删 —— 否则「删空间时顺带清副本」会连带把用户**真实的**工作目录删掉。
+     * 只在当前空间里查是不够的：另一个空间原地引用着 `C:\work\proj`，
+     * 而本空间某个副本的目标恰好被指到了 `C:\work`。
+     */
+    localRootPaths(): string[] {
+      return (s.allLocalRoots.all() as { root_path: string }[]).map((r) => r.root_path)
     }
   }
 }

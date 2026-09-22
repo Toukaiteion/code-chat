@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { runMigrations, currentVersion, MIGRATIONS } from '../../src/main/persist/migrations/index.ts'
+import { migration0001 } from '../../src/main/persist/migrations/0001-init.ts'
 import type { Migration } from '../../src/main/persist/migrations/types.ts'
 
 function freshDb(): DatabaseSync {
@@ -91,6 +92,75 @@ test('单个迁移失败时回滚，DB 停在上一版本（不留半新半旧�
     tables.map((t) => t.name),
     ['t1'],
     't2 必须被回滚掉'
+  )
+  db.close()
+})
+
+/**
+ * ★ v1 → v2 的**升级**路径（M4 新增 0002 时补的）。
+ *
+ * 这条不是形式主义：用户机器上那个 `userData/code-chat.db` 现在**就是 v1**，
+ * 里面还有 M3 期间建出来的空间。装上新版本后第一次启动走的就是这条路径 ——
+ * 它必须在**有数据**的库上正确，而不只是在空库上正确。
+ */
+test('★ v1 → v2 升级：回填 dir_name、建唯一索引，且已有数据不丢', () => {
+  const db = freshDb()
+
+  // 1) 先用**只有 0001** 的列表造一个 v1 库 —— 等价于用户现在手里的库。
+  assert.deepEqual(runMigrations(db, [migration0001]).applied, [1])
+
+  // 2) 塞几行 M3 时代建的空间（那时没有 dir_name 这一列）。
+  const insert = db.prepare(
+    `INSERT INTO workspace (id, name, active_project_id, created_at, updated_at, archived_at)
+     VALUES (?, ?, NULL, ?, ?, NULL)`
+  )
+  insert.run('w-old-1', '旧空间一', 100, 100)
+  insert.run('w-old-2', '旧空间二', 200, 200)
+
+  // 3) 升到最新版本。
+  const result = runMigrations(db)
+  assert.deepEqual(result.applied, [2], '只应补跑 0002')
+  assert.equal(result.from, 1)
+  assert.equal(result.to, 2)
+
+  // 4) 数据还在，且 dir_name 被回填成 id。
+  const rows = db
+    .prepare('SELECT id, name, dir_name FROM workspace ORDER BY created_at')
+    .all() as { id: string; name: string; dir_name: string | null }[]
+  assert.equal(rows.length, 2, '升级不能丢数据')
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.name, r.dir_name]),
+    [
+      ['w-old-1', '旧空间一', 'w-old-1'],
+      ['w-old-2', '旧空间二', 'w-old-2']
+    ],
+    '历史行的 dir_name 回填成 id —— 与 workspace-repo 的 dirName ?? id 是同一条规则'
+  )
+
+  // 5) 唯一索引真的建出来了，而且是**大小写不敏感**的表达式索引。
+  const index = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_workspace_dir_name'")
+    .get() as { sql: string } | undefined
+  assert.ok(index, 'idx_workspace_dir_name 必须存在')
+  assert.match(index.sql, /lower\(dir_name\)/, '索引必须建在 lower(dir_name) 上（NTFS 大小写不敏感）')
+
+  db.close()
+})
+
+test('★ v2 的唯一索引确实拦得住大小写不同的同名目录', () => {
+  const db = freshDb()
+  runMigrations(db)
+  const insert = db.prepare(
+    `INSERT INTO workspace (id, name, dir_name, active_project_id, created_at, updated_at, archived_at)
+     VALUES (?, ?, ?, NULL, ?, ?, NULL)`
+  )
+  insert.run('w1', 'Nova', 'Nova', 1, 1)
+
+  // 磁盘上 `Nova` 与 `nova` 是**同一个目录**，所以 DB 也必须当成同一个。
+  assert.throws(
+    () => insert.run('w2', 'nova 小写', 'nova', 2, 2),
+    /UNIQUE|constraint/i,
+    '大小写不同的同名目录必须被索引拦下 —— 否则就是「DB 放行、磁盘撞车」'
   )
   db.close()
 })

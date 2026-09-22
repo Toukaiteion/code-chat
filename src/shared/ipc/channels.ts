@@ -22,6 +22,11 @@ export const INVOKE_CHANNELS = [
   'workspace:delete',
   /** 设置 cwd 的二级兜底（§8.5b）。传 null 清空。 */
   'workspace:setActive',
+  /**
+   * 空间目录的绝对路径（§8.3）。目录根在 `userData` 里、用户看不见，
+   * 而 UI 必须能如实显示它（尤其因为**改名不会移动目录**）。
+   */
+  'workspace:paths',
 
   // ── project ────────────────────────────────────────────────
   'project:list',
@@ -31,6 +36,11 @@ export const INVOKE_CHANNELS = [
   'project:copy',
   /** 三种导入方式之三：git clone 到指定目录。M4。 */
   'project:clone',
+  /**
+   * 默认落点 `<空间目录>/projects/<项目名>`（§8.3）。
+   * 放主进程算 —— 免得渲染侧自己去做平台路径拼接。
+   */
+  'project:defaultTarget',
   'project:rename',
   'project:remove',
 
@@ -39,6 +49,11 @@ export const INVOKE_CHANNELS = [
   'actor:get',
   'actor:create',
   'actor:update',
+  /**
+   * 重新选择人设文件。`actor:update` **刻意不碰** `personaPath`/`personaHash`，
+   * 所以重选人设是独立的一步（读文件 + 算 hash + 影响缓存前缀，§4.6）。
+   */
+  'actor:setPersona',
   'actor:remove',
 
   // ── member（actor × workspace）──────────────────────────────
@@ -79,6 +94,20 @@ export const INVOKE_CHANNELS = [
   'turn:list',
   'turn:get',
   'turn:listLive',
+
+  // ── 宿主能力（对话框 / 文件管理器）──────────────────────────
+  //
+  // 这两个是**渲染侧够不着**的能力：`dialog.showOpenDialog` 与 `shell.openPath`
+  // 都只能主进程调。走注入（`SysCapabilities`）而不是让 handler 直接 import electron，
+  // 是为了保住「registry 不 import electron」这条不变量 —— 靠它，`test/ipc/`
+  // 才能把整条 IPC 路径在裸 Node 下跑完。
+  //
+  // ⚠️ 注意它们**不是**唯一的入路：UI 上每个路径输入框都是可编辑文本框，
+  // 选择器只是便利。这既照顾「用户有自己的排布习惯」（§8.2），也让验收不必去点原生对话框。
+  /** 弹原生选择器。取消返回 `null`。 */
+  'dialog:pickPath',
+  /** 在系统文件管理器里定位一个路径。打不开返回 `false`（路径不存在等）。 */
+  'shell:revealPath',
 
   // ── view / stream / runtime ────────────────────────────────
   /** 告诉主进程当前可见的空间/会话 —— 驱动跨空间**抑制**（§4.3）。 */

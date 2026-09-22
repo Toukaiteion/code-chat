@@ -26,6 +26,34 @@ export interface ActiveView {
 }
 
 /**
+ * 宿主能力 —— handler 需要它，但**它只能由主进程提供**。
+ *
+ * 原生对话框与文件管理器会打破本文件最重要的那条不变量：
+ * **registry 不 import electron**。靠它，`test/ipc/` 才能把整条 IPC 路径
+ * （校验 → 分发 → 信封）在裸 Node 下跑完，不用起 Electron、不用点对话框。
+ *
+ * 所以这一袋子跟 `now` / `newId` 走同一套注入手法：生产环境接真实现
+ * （`system-capabilities.ts`），测试里接固定实现。
+ *
+ * 顺带的好处：测试能直接把 `locateGit()` 变成「返回 null」，
+ * 于是「本机没装 git」这条分支也能被验到 —— 否则它永远只能靠人肉忘装一次来发现。
+ */
+export interface SysCapabilities {
+  /** 弹原生选择器；用户取消返回 `null`。 */
+  pickPath(opts: {
+    mode: 'file' | 'directory'
+    title?: string
+    defaultPath?: string
+  }): Promise<string | null>
+  /** 在系统文件管理器里定位一个路径。打不开（路径不存在等）返回 `false`。 */
+  revealPath(path: string): Promise<boolean>
+  /** §8.3 的空间根目录，`userData/workspaces`。 */
+  workspacesRoot(): string
+  /** 找 `git` 可执行文件；找不到返回 `null`（由 handler 说人话）。 */
+  locateGit(): Promise<string | null>
+}
+
+/**
  * handler 能拿到的东西。
  *
  * `now` 与 `newId` 走**注入**而不是直接调 `Date.now()` / `randomUUID()`，
@@ -37,6 +65,7 @@ export interface HandlerContext {
   now(): number
   newId(): string
   view: ActiveView
+  sys: SysCapabilities
 }
 
 export type Handler<K extends InvokeChannel> = (

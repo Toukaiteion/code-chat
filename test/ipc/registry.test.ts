@@ -72,13 +72,6 @@ test('★ 未实现的通道在合法载荷下返回 E_NOT_IMPLEMENTED，并带�
 
   // 这些载荷**全都能过 zod**（否则测的就不是「未实现」而是「校验」了）。
   const valid: Record<string, unknown> = {
-    'project:copy': { workspaceId: w, name: 'x', sourcePath: 'G:/a', targetPath: 'G:/b' },
-    'project:clone': {
-      workspaceId: w,
-      name: 'x',
-      remoteUrl: 'https://example.com/x.git',
-      targetPath: 'G:/b'
-    },
     'turn:send': { workspaceId: w, memberId, text: '你好' },
     'turn:interject': { turnId: 't1', text: '插一句' },
     'turn:stopAll': { workspaceId: w },
@@ -92,10 +85,14 @@ test('★ 未实现的通道在合法载荷下返回 E_NOT_IMPLEMENTED，并带�
     reported[channel] = (error.detail as { milestone: string }).milestone
   }
 
-  // ★ 「不填桩」那个决定的清单化表达：这 6 个通道永远不返回伪造的成功数据。
+  /**
+   * ★ 「不填桩」那个决定的清单化表达：这些通道永远不返回伪造的成功数据。
+   *
+   * M4 把 `project:copy` / `project:clone` 从这个清单里**移走了** —— 它们真的实现了，
+   * 不再是 defer。真正实现的那两条由 `test/ipc/import.test.ts` 覆盖（真文件系统、
+   * 真 git），不在这里用「未实现」的方式验。
+   */
   assert.deepEqual(reported, {
-    'project:copy': 'M4',
-    'project:clone': 'M4',
     'turn:send': 'M5/M6',
     'turn:interject': 'M9',
     'turn:stopAll': 'M9',
@@ -221,7 +218,19 @@ test('workspace 的建改删走的是真数据', async () => {
 
   assert.equal(expectOk<Workspace[]>(await h.call('workspace:list')).length, 1)
   assert.equal(expectOk<Workspace>(await h.call('workspace:update', { id, name: 'Orion' })).name, 'Orion')
-  assert.deepEqual(expectOk(await h.call('workspace:delete', { id })), { deleted: true })
+
+  // 没有项目 → 没有副本可谈；但**空间目录本身照常报告**（永不删除，只说它在哪）。
+  const report = expectOk<{
+    deleted: boolean
+    copies: unknown[]
+    workspaceDir: string
+    workspaceDirExists: boolean
+  }>(await h.call('workspace:delete', { id }))
+  assert.equal(report.deleted, true)
+  assert.deepEqual(report.copies, [])
+  assert.equal(report.workspaceDirExists, true, '空间目录不随记录一起删')
+  assert.match(report.workspaceDir, /Nova$/)
+
   assert.deepEqual(expectOk(await h.call('workspace:list')), [])
 })
 
@@ -296,7 +305,14 @@ test('project:remove 只删数据库行 —— 磁盘目录一个字节都不动
     const project = expectOk<{ id: string }>(
       await h.call('project:addLocal', { workspaceId: w, name: '我的', rootPath: dir })
     )
-    assert.deepEqual(expectOk(await h.call('project:remove', { id: project.id })), { deleted: true })
+    // ★ 即使明确要求删副本也必须拒绝 —— `local` 型不归我们管。
+    //   报告里 `state: 'kept'` 是**要说给用户听**的：勾了却没发生，必须有个交代。
+    const report = expectOk<{ deleted: boolean; copy: { state: string; path: string } }>(
+      await h.call('project:remove', { id: project.id, deleteCopy: true })
+    )
+    assert.equal(report.deleted, true)
+    assert.equal(report.copy.state, 'kept', 'local 型永远不删磁盘')
+    assert.equal(report.copy.path, resolve(dir))
 
     // 目录仍在 —— 这是 §8.2 的硬要求，不是副作用。
     const { stat } = await import('node:fs/promises')

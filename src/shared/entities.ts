@@ -66,6 +66,15 @@ export interface Mention {
 export interface Workspace {
   id: string
   name: string
+  /**
+   * ★ 这个空间在磁盘上那一层目录的**名字**（`<workspaceRoot>/<dirName>/`，§8.3）。
+   *
+   * 存下来而不是每次从 `name` 推，是因为目录名必须**稳定**：
+   * 创建时定死一次，之后改名**不动目录**（见 `infra/space-dir.ts` 的三条理由）。
+   * 它是路径的**单段名字**，不是绝对路径 —— 根目录由 `workspaceRoot` 决定，
+   * 那是个跟机器相关的量，不该进数据库。
+   */
+  dirName: string
   /** cwd 的**二级兜底**（§8.5b），不是权威。成员没有主项目时才轮到它。 */
   activeProjectId: string | null
   createdAt: number

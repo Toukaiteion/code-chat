@@ -6,6 +6,7 @@ import type { Store } from './persist/index.ts'
 import { openStore } from './persist/index.ts'
 import { dbPath } from './infra/paths.ts'
 import { createContext } from './ipc/context.ts'
+import { createSystemCapabilities } from './ipc/system-capabilities.ts'
 import { createElectronTransport } from './ipc/electron-transport.ts'
 import { createRegistry, type Registry } from './ipc/registry.ts'
 import { registerAll } from './ipc/handlers/index.ts'
@@ -71,7 +72,7 @@ function startBackend(): void {
     mkdirSync(dirname(dbPath()), { recursive: true })
 
     const store = openStore(dbPath())
-    const ctx = createContext(store)
+    const ctx = createContext(store, createSystemCapabilities())
     const registry = createRegistry(transport, ctx)
 
     registerAll(registry, ctx)
