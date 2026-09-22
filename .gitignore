@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+.vite/
+*.tsbuildinfo
+
+# 本地数据（应用运行时会写到 userData，不会落在这里，但以防万一）
+*.db
+*.db-wal
+*.db-shm
+blobs/

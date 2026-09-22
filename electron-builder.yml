@@ -1,0 +1,31 @@
+# appId 是自动更新的身份标识，不是普通配置 ——
+# 日后更改会破坏所有既有安装。现在就定，不再动。
+appId: com.codechat.app
+productName: Code Chat
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+
+# 绝不打包 claude 二进制（约 237MB，且是用户自己的 CLI）——
+# 运行时由 cli-locator 定位。这里显式排除，防止误入。
+# 也绝不把 @anthropic-ai/claude-agent-sdk 装成运行时依赖：
+# 它的 optionalDependencies 会按平台拉进同名二进制。
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # 阶段一不签名，接受 SmartScreen 警告（见 README）
+  signAndEditExecutable: false
+
+nsis:
+  perMachine: false
+  oneClick: false
+  allowToChangeInstallationDirectory: true

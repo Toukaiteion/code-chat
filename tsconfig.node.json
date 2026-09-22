@@ -1,0 +1,24 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": [
+    "electron.vite.config.ts",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "test/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "types": ["electron-vite/node", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"]
+    },
+    // ★ test/** 由 `node --test` 以**原生类型剥离**直接跑源码（无打包器）。
+    // Node 的 ESM 解析器不认 tsconfig 的 paths 别名，也不做扩展名补全，
+    // 所以 src/main/** 内部一律用**显式相对路径 + .ts 扩展名**引用，
+    // 例如 `import type { Project } from '../../../shared/entities.ts'`。
+    // 渲染进程仍可用 `@shared/*` 别名 —— 它经过 Vite 打包，不跑在裸 Node 上。
+    "allowImportingTsExtensions": true
+  }
+}

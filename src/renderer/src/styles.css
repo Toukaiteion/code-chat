@@ -1,0 +1,148 @@
+@import 'tailwindcss';
+
+/* ── 深空霓虹调色板 ────────────────────────────────────────────
+   全部走 CSS 变量，将来加浅色主题只是换一组变量。        */
+@theme {
+  --color-void: #05060a;
+  --color-abyss: #0a0c14;
+  --color-panel: #0e111b;
+  --color-panel-2: #131725;
+  --color-edge: #1b2030;
+  --color-edge-bright: #2a3350;
+
+  --color-neon-cyan: #22d3ee;
+  --color-neon-violet: #a855f7;
+  --color-neon-pink: #f472b6;
+  --color-neon-lime: #a3e635;
+
+  --color-ink: #e6edf7;
+  --color-ink-dim: #8b97ad;
+  --color-ink-faint: #5a6478;
+
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ── 打字光标：纯 CSS 动画，绝不进 React state ──────────────────
+   用 React 布尔量跟踪光标可见性 = 每次闪烁多一次重渲染。   */
+.typing-cursor::after {
+  content: '';
+  display: inline-block;
+  width: 0.55ch;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-neon-cyan);
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ── 霓虹描边 ──────────────────────────────────────────────────
+   辉光烘焙进静态伪元素，只 animate opacity。
+   直接 animate box-shadow / text-shadow 会在流式期间每帧全量重绘。 */
+.neon-frame {
+  position: relative;
+  contain: layout paint;
+}
+.neon-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--color-neon-cyan), var(--color-neon-violet));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.4;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.neon-frame:hover::before {
+  opacity: 0.8;
+}
+
+/* ── 活跃角色光环：静态径向渐变，不随流式重绘 ── */
+.neon-halo {
+  position: relative;
+  contain: layout paint;
+}
+.neon-halo::before {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in oklab, var(--color-neon-cyan) 24%, transparent),
+    transparent 70%
+  );
+  opacity: 0.7;
+  filter: blur(14px);
+  pointer-events: none;
+}
+
+/* 网格底纹 */
+.grid-bg {
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--color-edge) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--color-edge) 55%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* 细滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-bright) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-edge-bright);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-cursor::after {
+    animation: none;
+    opacity: 1;
+  }
+  .neon-halo::before {
+    opacity: 0.3;
+  }
+}

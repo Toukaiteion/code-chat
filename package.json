@@ -1,0 +1,41 @@
+{
+  "name": "code-chat",
+  "version": "0.1.0",
+  "description": "多角色 AI 协作编码桌面应用",
+  "main": "./out/main/index.js",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "3.0.2",
+    "@electron-toolkit/tsconfig": "2.0.0",
+    "@electron-toolkit/utils": "4.0.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/react-virtual": "3.14.13",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.4.3",
+    "electron-builder": "26.16.1",
+    "electron-vite": "5.0.0",
+    "motion": "13.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "zod": "4.6.5",
+    "zustand": "5.0.15"
+  }
+}
