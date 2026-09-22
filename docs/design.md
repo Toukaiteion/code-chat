@@ -966,6 +966,8 @@ electron.exe --remote-debugging-port=9222 --user-data-dir=<沙箱> .
 
 **走查发现的一个真实缺陷**（已修，记入 §8.8c 规则七）：删掉**最后一个**工作空间时，界面切到首启空态，而那个布局分支**没有渲染 `NoticeBar`** —— 最要紧的删除报告一个字都没露过面。
 
+**迁移 0002 在用户真实库上跑过**（不是只在临时库上）：`userData/code-chat.db` 从 v1 升到 v2 —— `schema_migrations` 两行（`1:init` / `2:workspace-dir-name`），`workspace` 表多了可空的 `dir_name` 列，`idx_workspace_dir_name` 唯一索引在位。这次它没什么可回填的（M3 的探针空间已删除），但**先有 v1 库、再升上来**这条路径是走通的。
+
 **一个仍然存在的边界**：copy 与 clone 没有进度、不能取消（§8.2a / §8.9-8）。走查里的本地裸仓库很小，所以这一项**没有被真正压测**。
 
 ---
