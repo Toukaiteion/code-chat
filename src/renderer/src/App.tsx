@@ -1,8 +1,12 @@
 /**
  * M0 外壳 —— 只验证「窗口能开 + 视觉方向对不对」。
  * 这里的消息全部是 mock 数据；M6 会替换为真实的 IPC 流式渲染。
+ *
+ * M3 起左下角多了一个 `IpcSelfCheck`：那是**桥**的探针，不是界面的一部分，
+ * 它证明 IPC 通路真的通了（验收标准见 `docs/design.md` §六 M3 行）。
  */
 import { useState } from 'react'
+import { IpcSelfCheck } from './IpcSelfCheck'
 
 // ── 侧边栏：工作空间列表 ──────────────────────────────────────
 function WorkspaceList({ activeId, onSelect }: { activeId: string; onSelect: (id: string) => void }) {
@@ -53,7 +57,8 @@ function WorkspaceList({ activeId, onSelect }: { activeId: string; onSelect: (id
         </button>
       </div>
 
-      <div className="mt-auto p-3">
+      <div className="mt-auto flex flex-col gap-2 p-3">
+        <IpcSelfCheck />
         <div className="border-edge bg-panel text-ink-faint rounded-md border px-3 py-2 font-mono text-[10px]">
           M0 外壳 · 视觉验证
         </div>

@@ -13,6 +13,11 @@
     "paths": {
       "@shared/*": ["src/shared/*"],
       "@/*": ["src/renderer/src/*"]
-    }
+    },
+    // ★ src/shared/** 被**两个** tsconfig 项目同时编译（node 侧和这里）。
+    // shared/ipc/** 内部必须用显式 `.ts` 扩展名互相引用 —— 因为 test/ipc/*.test.ts
+    // 会让**裸 Node** 沿这条链加载，而 Node 的 ESM 解析器不做扩展名补全。
+    // 没有这个开关，`typecheck:node` 会过而 `typecheck:web` 报 TS5097。
+    "allowImportingTsExtensions": true
   }
 }

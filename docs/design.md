@@ -459,19 +459,26 @@ CREATE INDEX idx_event_retention ON message_event(kind, created_at);
 
 **通道命名**：`domain:verb`（invoke/handle），`stream:*` / `app:*`（推送）。
 
-**渲染 → 主**（`invoke`）：
+**渲染 → 主**（`invoke`）—— **权威清单在 `src/shared/ipc/channels.ts`**（44 条），下方是分组概要，实现时以那个文件为准：
+
 ```
 workspace:list | create | update | delete | setActive
-project:list | addLocal | clone | setActive | remove
-actor:* / member:* / session:*
-message:list          # 分页历史 { workspaceId, sessionId?, beforeSeq?, limit }
-message:getEvents     # 单条消息的完整未截断事件
+project:list | addLocal | copy | clone | rename | remove
+actor:list | get | create | update | remove
+member:list | create | remove | setEnabled | setRoleDesc | setRouter | setPermissions
+       | visibility | setVisibility | setPrimary | clearVisibility
+session:list | getByMember | remove
+message:list          # 分页历史 { workspaceId, sessionId?, beforeSeq?, limit }，三种取法有优先级
+message:getEvents     # 单条消息的完整未截断事件（含 thinking）
 turn:send             # { workspaceId, memberId, text, mentions[] } → { turnId }
-turn:stop | turn:stopAll | turn:interject
+turn:stop | stopAll | interject
+turn:list | get | listLive
 view:setActive        # { workspaceId, sessionId } — 驱动跨空间抑制
 stream:resume         # { sessionId, fromSeq }
 runtime:getState      # 运行中的轮、队列深度、并发槽位
 ```
+
+（`project:setActive` **不存在**：切换活跃项目是 `workspace:setActive`，因为那是空间的属性而不是项目的。）
 
 **主 → 渲染**（只四个通道，刻意克制）：
 ```
@@ -519,6 +526,44 @@ type StreamFrame =
 > **为什么不用 MessagePort per session**：30Hz 下消息率已与鼠标移动流相当，而瓶颈是模型每几百毫秒才吐一个 token，端口在延迟上的优势无关紧要。更关键的是**端口会主动对抗我们的需求**——「后台空间继续跑」意味着渲染层得为**每个空间的每个 session**保持活端口，或在切换时开关端口，**恰好把 `seq`+`stream:resume` 已经解决的竞态又引回来**。
 
 所有入站 IPC 载荷用 **zod** 在主进程校验——被攻陷的渲染层不得向 repository 层注入畸形结构。
+
+#### 4.3a ★ handler 一律**返回信封**，绝不抛异常（M3 实测，已确认）
+
+**实测结论（`scripts/m3-ipc-error-probe.cjs`，Electron 44.4.3）**：`ipcMain.handle` 的 handler 抛出异常时，渲染侧收到的东西是这样：
+
+```
+① handler 抛出 new AppError('E_CONFLICT', '…')（带 code 与 detail）
+   渲染侧收到 → constructor: 'Error'   ownKeys: []   code: (丢失)   detail: (丢失)
+                message: "Error invoking remote method 'probe:appError': AppError: 这个目录已经加过了"
+
+② handler 返回 { ok:false, error:{ code, message, detail } }
+   渲染侧收到 → 与发送端**逐字节一致**（含嵌套的 detail）
+
+③ 抛出的 Error 上挂一个含循环引用的 detail
+   渲染侧收到 → detail 丢失（did not throw，静默丢字段）
+```
+
+**三件事都被证实了**，而且比预期更糟：自定义字段（`code` / `detail`）丢掉、构造器退化成裸 `Error`、连 `message` 都被套上一层 `Error invoking remote method '…'` 前缀。而 M2 的 repository 恰恰靠 `errcode` 区分约束类型（2067 = 唯一约束、787 = 外键）——**靠抛异常等于主动扔掉唯一能区分「目录已存在」和「成员已有主项目」的信息**。
+
+**因此定下纪律**（`src/shared/ipc/envelope.ts` + `src/main/ipc/errors.ts`）：
+
+```ts
+type IpcResult<T> = { ok: true; data: T }
+                  | { ok: false; error: { code: IpcErrorCode; message: string; detail?: unknown } }
+```
+
+- **跨进程边界的那一次返回**永远是 `IpcResult`，失败码是闭合联合：`E_INVALID_PAYLOAD`（zod 拒绝）/ `E_NOT_FOUND` / `E_CONFLICT` / `E_FK_MISSING` / `E_NOT_IMPLEMENTED` / `E_INTERNAL`。
+- handler **内部**照常可以 `throw`（`registry` 在边界上统一 `catch` 并转信封）—— 纪律约束的是那一次返回，不是函数内部。
+- 兜底映射只做 `SqliteError → E_CONFLICT/E_FK_MISSING`（靠 `errcode`，**不解析报错字符串**）；语义翻译留在 handler 层，因为只有它知道上下文（`project-repo.ts` 早就写明了这一点）。
+- `detail` 出边界前先过一遍 JSON 往返（③ 的教训），不可序列化就降级成字符串 —— **信封本身永远不能因为 detail 而失败**。
+
+#### 4.3b 通道分类必须穷尽，且在启动时断言
+
+`registry.seal()` 会检查 `INVOKE_CHANNELS` 里每个通道要么 `handle`、要么 `defer(channel, 'M4')`，漏掉一个就在**启动时**抛错。
+
+`defer` 的通道返回 `E_NOT_IMPLEMENTED` 并在 `detail.milestone` 里带上里程碑号。**刻意不填桩**：`turn:send` 若返回一个伪造的 `turnId`，UI 会渲染出一条**永远不会运行的轮次** —— 比一个写明「M5/M6 才有」的报错坏得多。
+
+M3 结束时被 defer 的 6 个通道：`project:copy` / `project:clone`（M4）、`turn:send`（M5/M6）、`turn:interject` / `turn:stopAll`（M9）、`stream:resume`（M6）。另有 `turn:stop` 的 **running 分支**返回 `E_NOT_IMPLEMENTED(M9)`，而它的 `queued` 分支是真的（`markCancelled`，M2 已有）。
 
 ### 4.4 Agent 适配层
 
@@ -811,7 +856,7 @@ UI 上仍保留思考面板的位置（`message_event.kind='thinking'` 照常落
 | **M0** | ✅ **已完成** 脚手架：electron-vite + React + TS + Tailwind。窗口能开。 | `npm run dev` → 窗口渲染；改组件 → HMR 不刷新。**实测：`hmr update /src/App.tsx`，零 `page reload`，零渲染错误。** |
 | **M1** | ✅ **已完成** `node:sqlite` 证明。见 §2.1 五项实测结果。 | 五项全过，`M1 PASS`。持久化选型锁定 `node:sqlite`。 |
 | **M2** | ✅ **已完成** Schema + 迁移器 + 全部 repository。**含 `member_project` 与 `origin` 三值**（§8.4/§8.2）。 | 35 个用例全过（`node --test`，纯 Node 无 Electron，内存库）；迁移重跑幂等已验；`idx_member_router` / `idx_member_primary` 两条偏索引均已验「DB 而非应用层拒绝」。踩到的两个坑记入 §8.9。 |
-| **M3** | IPC 契约：`registry.ts`、preload 桥、`shared/` 里的 zod schema。 | 调试点一次 `workspace:list` → `[]` |
+| **M3** | ✅ **已完成** IPC 契约：`registry.ts`、preload 桥、`shared/` 里的 zod schema。 | 调试点一次 `workspace:list` → `[]`。**实测见 §4.3a**：① 信封设计的必要性已用 `scripts/m3-ipc-error-probe.cjs` 在 Electron 44.4.3 上实证 —— 抛异常会丢掉 `code`/`detail`，连 message 都被套上 `Error invoking remote method '…'` 前缀；② 44 条 invoke 通道全部注册，6 条按里程碑 `defer`，漏一条 `seal()` 在启动时就抛；③ **86 个用例全过**（M2 的 35 个仍全绿 + 51 个新增），两个 tsconfig 项目 typecheck 干净。 |
 | **M4** | 工作空间/项目 CRUD、切换器、**三种导入方式**（§8.2）、成员可见性配置。 | 建空间；三种方式各加一个项目；`origin='local'` 的项目**删空间后目录仍在**；配置成员可见项目与主项目 |
 | **M5** | **`ClaudeAdapter`** + CLI 定位器：spawn、解析 stream-json、吐 `AgentEvent`、**`collectProjectContext`**（§8.5c）。 | 硬编码 prompt → 打印 text/thinking/tool delta。**四项必须在这里量**：① 冷启动时间与峰值 RSS（鲜进程 spawn 237MB 二进制，未实测）② **thinking_delta 是否真带文本**（§5.7 的降级决策依赖它）③ 是否出现 `system:compact_boundary` 事件（§5.3，若出现说明窗口算错了）④ **`--add-dir` 引入的 CLAUDE.md 与我们显式注入的是否重复**（§8.5c，用两个可区分标记字符串实测；**结论出来前不写去重逻辑**） |
 | **M6** | 事件持久化 + `event-batcher` + 流式 UI。 | 完整对话一轮后硬杀应用，重开 → 历史完整重放，含思考、工具、diff |
@@ -1074,10 +1119,32 @@ M6 的 `event-batcher` 要把「追加消息 + 追加事件 + 推进 seq」打�
 
 **修法**：`append` / `appendEvent` 一律走 `db.ts` 的 `withTransaction` —— 它在深度 0 用 `BEGIN`，更深用 `SAVEPOINT`，因此**嵌套是合法的分层保存点**，且外层回滚能一并撤销内层的「提交」（实际只是 `RELEASE SAVEPOINT`）。`test/persist/repositories.test.ts` 末尾三个用例把这两条规则钉住了。
 
+### 8.8b M3 实现纪律：两条关于**模块边界**的规则
+
+这两条是 M3 落地时才显形的**配置/加载**层面陷阱，症状都是「另一半莫名其妙地失败」。
+
+**规则三：`src/shared/**` 被**两个** tsconfig 项目同时编译，而 `allowImportingTsExtensions` 必须两边都有。**
+
+`tsconfig.node.json` 与 `tsconfig.web.json` 的 `include` 都含 `src/shared/**`。而 `test/ipc/*.test.ts` 会让**裸 Node** 沿 shared 那条链加载 —— Node 的 ESM 解析器**不做扩展名补全**，所以 shared 内部互相引用必须写成 `./envelope.ts`。
+
+于是：`allowImportingTsExtensions` 只加在 node 侧时，`typecheck:node` 通过而 `typecheck:web` 报 **TS5097**。这不是「web 侧的问题」，是**同一批文件被两套编译选项各判一次**的结构性后果。
+
+**规则四（别名规则）：`src/main/**` 只能用相对路径 + `.ts`；`src/preload/**` 与 `src/renderer/**` 可以且应当用 `@shared/*`。**
+
+三个 tsconfig 都声明了 `@shared` 别名，但**只有经 Vite 打包的两侧在运行时可解析**。`src/main/**` 是**裸 Node 加载**的（`test/**` 直接 import 它），Node 不认识 tsconfig 的 `paths` —— 在那里写 `@shared/x.ts` 会在 `npm test` 时炸，而 `npm run dev` 里一切正常。
+
+> 两条规则是同一件事的两面：**「谁在运行时加载这个文件」决定了它能用什么写法**。`main` 归 Node，`preload`/`renderer` 归 Vite，`shared` 两边都进 —— 所以 shared 必须写成两边都能吃的最保守形式（相对路径 + `.ts`）。
+
+**附带定的两个 M3 决策**（写在这里免得日后当成既成事实）：
+
+- **`Session` 在 `member:create` 里创建**（同一事务）。理由：session 与成员 1:1，而通道清单里**没有 `session:create`** —— 它的诞生点只能在「成员诞生」这一处。若 M5 的调度器要改成惰性创建，需要先加通道。
+- **`workspaceRoot` 未定位置**，所以 `src/main/infra/paths.ts` 只有 `dbPath()` 与 `blobsRoot()`。§8.3 只写了 `<workspaceRoot>/<空间名>/`，没写根本身在哪。刻意**不**先猜一个 —— 它决定用户的文件出现在哪，留到 M4 的导入流程里定。
+
 ### 8.9 待办
 
 1. ~~设计文档落地~~ ✅ 已完成：已落到仓库 `docs/design.md`，与代码一起版本化。此后**以仓库内这份为准**，Claude Code 计划目录里的那份是副本。
-   > ⚠️ 仓库仍未 `git init`（`G:\project\code-chat` 不是 git 仓库），所以"版本化"目前只是文件就位 —— **建议在 M3 之前把仓库初始化并提交 M0–M2**，否则这条里程碑没有真正的历史可回溯。
+   > ~~⚠️ 仓库仍未 `git init`~~ ✅ **M3 之前已完成**：`git init` + 基线提交（M0–M2，34 文件）。此后**每个里程碑一个 commit**。
 2. ~~§4.2 DDL 同步~~ ✅ 已完成：`member_project` 已加入、`working_paths_json` 已移除、`project.origin` 已扩为三值。
 3. **M5 的两个未知项待实测**：`--add-dir` 的 CLAUDE.md 是否与显式注入重复（§8.5c）；thinking_delta 是否带正文（§5.7）。
 4. **§5.5a 的缺口需要产品决策**：默认自主模式下，混淆 shell 命令可绕过 deny 列表。若要闭合，唯一完整手段是 **PreToolUse hook**（§5.5a 表）。阶段一不做，但需在 UI 上以准确措辞呈现（"能静态判定的路径是硬的"），不要把 deny 列表说成"安全"。
+5. **启动期的 `turn.reapOrphans()` 尚未接线**（§4.4）。`turn-repo.reapOrphans` 已就位、已有用例，但 `src/main/index.ts` 刻意没调它 —— 孤儿清扫连同 `taskkill` 记录的 PID 是 **M10** 的整块工作，M3 不做以免里程碑边界模糊。**在那之前，硬杀应用会留下 `status='running'` 的僵尸轮次**，这是已知且已接受的中间状态。
