@@ -5,7 +5,10 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
-    "test/**/*"
+    "test/**/*",
+    // ★ 探针脚本。**必须在这里**，否则 `scripts/m5-probe.ts` 就是全仓库唯一
+    // 一份零静态检查的代码 —— 而它恰恰是唯一会花真钱的代码。
+    "scripts/**/*.ts"
   ],
   "compilerOptions": {
     "composite": true,

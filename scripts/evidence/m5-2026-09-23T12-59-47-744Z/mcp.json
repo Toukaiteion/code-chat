@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "m5probe": {
+      "command": "D:\\nodejs\\node.exe",
+      "args": [
+        "G:\\project\\code-chat\\scripts\\fixtures\\mcp-probe-server.cjs",
+        "--log",
+        "G:\\project\\code-chat\\scripts\\out\\m5-2026-09-23T12-59-47-744Z\\mcp-server.log",
+        "--marker",
+        "MK-MCP-a73e2"
+      ]
+    }
+  }
+}

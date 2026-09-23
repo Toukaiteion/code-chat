@@ -151,11 +151,26 @@ claude -p "<prompt>" --output-format stream-json --verbose \
 | CLI 输出行 | 承载内容 | 映射到 `AgentEvent` |
 |---|---|---|
 | `system:init` | `session_id`, `cwd`, `model`, `permissionMode`, `tools` | `session_started` |
-| `system:status` | `status`（如 `requesting`） | `status_changed` |
-| `stream_event` | `message_start`(含 usage)、`content_block_delta`(`thinking_delta`/`text_delta`/`input_json_delta`/`signature_delta`)、`content_block_stop`、`message_delta`。**另带 `ttft_ms`** | `thinking_delta`/`text_delta` |
+| `system:status` | `status`（如 `requesting`/`compacting`）；**`status` 可以是 `null`，那时装的是压缩结果**（见 §2.3-5） | `status_changed` |
+| `system:thinking_tokens` | `estimated_tokens`。**高频**：M5 实测一轮 857 条 | 不发事件（累计成估算值） |
+| `system:permission_denied` | `tool_name`/`decision_reason`/`message` | 不发事件（留诊断） |
+| `stream_event` | `message_start`(含 usage)、`content_block_delta`(`thinking_delta`/`text_delta`/`input_json_delta`/`signature_delta`)、`content_block_stop`、`message_delta`。**另带 `ttft_ms`**（一次 API 请求一个，见下） | `thinking_delta`/`text_delta` |
 | `assistant` | 完整消息，`content[]` 含 `thinking`(带 signature)/`tool_use`(带完整 input)/`text` | 完整块 |
 | `user` | `content[]` 含 `tool_result`；**顶层另有 `tool_use_result`**（结构化，如 Read 返回 `{file:{filePath,content,numLines,startLine,totalLines}}`）；带 `timestamp` | `tool_result` |
-| `result:success` | `total_cost_usd`, `duration_api_ms`, `usage`(含 `cache_creation_input_tokens`/`cache_read_input_tokens`/`output_tokens_details.thinking_tokens`) | `usage` + `done` |
+| `result:success` | `total_cost_usd`, `duration_api_ms`, `usage`(含 `cache_creation_input_tokens`/`cache_read_input_tokens`/`output_tokens_details.thinking_tokens`)、**`terminal_reason`**、`num_turns`、`modelUsage.<model>.contextWindow`、`permission_denials` | `usage` + `done` |
+| `control_response` | 中断请求的 ACK，**内层 `response.response.still_queued`**。**ACK ≠ 完成** | 不发事件（只观测） |
+
+**M5 探针补正的四处（`scripts/m5-probe.ts` 归档，2026-09-23）**：
+
+- **`ttft_ms` 不是冷启动指标**：它挂在每个 `stream_event/message_start` 上（一次 API 请求一个），
+  终态行上另有一个汇总值。实测一轮 4 个（`176, 174, 200, 3339`）。真正的冷启动只能从我们的管道这头量：
+  实测 **825ms**（从 spawn 到第一块 stdout，含加载 237MB 二进制与握手）。
+- **`output_tokens_details.thinking_tokens` 会报 0**，而那一轮实打实有 857 段思考。
+  真正的数字只在 `system:thinking_tokens` 里 —— 但**它也只是估算**，所以取法是
+  「上报值 > 0 才用上报值，否则用流内累计估算」，**绝不用 0 去覆盖一个实测量**（§4.6）。
+- **终态行带 `terminal_reason`**（实测 `completed`），且 `subtype` 可以说着 `success` 而
+  `is_error` 说着 `true` —— 成败信号有**三个**，优先级见 §4.3 补记。
+- **`modelUsage.<model>.contextWindow` 会自报窗口**：本机端点上报的是 **200000**（见 §2.4-3）。
 
 **已验证存在的隐藏/易漏旗标**：
 
@@ -169,12 +184,25 @@ claude -p "<prompt>" --output-format stream-json --verbose \
 | `--exclude-dynamic-system-prompt-sections` | ✅ | 保 prefix 稳定 |
 | `--autocompact <auto\|tokens>` | ✅ | 与我们的压缩协调 |
 
-### 2.3 必须处理的四个坑
+### 2.3 必须处理的坑（原四条 + M5 新增两条）
 
 1. **输出流中存在非 JSON 行**。实测遇到 `[claude-code:unrecognized_model] {...}`。解析器**必须逐行容错**，跳过无法解析的行而非崩溃。
-2. **`--include-partial-messages` 会导致同一内容到达两次**（一次增量 `stream_event`，一次完整 `assistant`）。渲染层必须**原地替换**而非追加。
-3. **`permissionMode` 回报值是 `"default"`，而 `--help` 的可选项里没有 `default`**。help 列的是入参名，回报的是内部名，不要用回报值反推入参。
+2. **`--include-partial-messages` 会导致同一内容到达两次**（一次增量 `stream_event`，一次完整 `assistant`）。
+   > ★ **M5 裁定（所有权变更）**：去重归**解析器**，不归渲染层。原文写的「渲染层必须原地替换而非追加」
+   > 是在适配器存在之前写的判据 —— 现在解析器就在它前面，双方都做 = 双重抑制，都不做 = 文字重复。
+   > 按 §4.7「每个事实一个所有者」，**裁给离源头最近的那一层**。渲染层不再需要这条规则。
+3. **`permissionMode` 的回报值不能用来反推入参**。原文记的是「回报 `"default"`、而 `--help` 里没有 `default`」。
+   > ⚠️ **M5 实测没有复现后半句的形态**：`system:init` 回报的是 `permissionMode: "acceptEdits"` ——
+   > **正是我们传进去的那个值**，不是 `"default"`。所以「回报值是内部名」这个说法至少不是普遍成立的。
+   > 但**结论不变且更强**：`--help` 的取值表里确实**没有 `default`**，所以 `permissionMode` 的类型
+   > 必须是 `string` 而**不是**字面量联合 —— 无论回报值是什么，我们都不该假设它是那两个集合里的元素。
+   > （记在这里是因为「原文档那句话错了」和「原结论错了」是两回事，不能顺手一起改掉。）
 4. **已知 bug（#94741）**：中断后终态 `result` 事件**会缺 `result` 字段**。解析器必须把 `result` 当可选字段，按 `subtype`/`terminal_reason` 分支。
+5. ★ **`system:status` 的 `status` 可以是 `null`**，此时同行带 `compact_result` + `compact_error`。
+   实测原文：`{"subtype":"status","status":null,"compact_result":"failed","compact_error":"too_few_groups"}`。
+   **对 `null` 直接 return 就是把一次压缩失败静默吞掉**（M5 第一版正是如此，靠归档才发现）。
+6. ★ **单行长度上限**（本节原文未列，见 §8.9-12）：`pending` 超过 8MB 即**放弃该行 + 记诊断 + 继续**。
+   不设上限时，一个不含换行的大工具结果（base64 / 长日志）就能把内存吃干。
 
 ### 2.4 用户环境特有约束（三条设计约束）
 
@@ -186,6 +214,16 @@ claude -p "<prompt>" --output-format stream-json --verbose \
    > *"deepseek-flash isn't described by this version's model catalog... auto-compact keeps this session within 200k tokens (the context window it assumes); if the model accepts more, append [1m] to the model name, or set CLAUDE_CODE_MAX_CONTEXT_TOKENS"*
    
    **这与「应用层拥有上下文」直接冲突**——两套压缩机制互相覆盖。对策见 §6.2。
+
+   ★ **M5 实测把「200k」这个数字坐实了，同时暴露了一件更麻烦的事**：
+   终态行的 `modelUsage.<model>.contextWindow` 自报 **200000** —— 也就是说 CLI 按 200k 记账。
+   而 CLI 同时**承认自己不认识这个模型**（上面那句警告），所以这个 200000 很可能是
+   **模型目录未命中时的兜底值**，不是该端点的真实窗口。两者若不一致（例如真实窗口更小），
+   CLI 会在我们以为还早的时候就开始压缩或直接阻断。**把 200000 当成「已知量」是错的**，
+   它只是「CLI 假设的量」。
+   > 佐证来自 §5.3 的实测：把 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 设成 20000 之后，CLI 不是
+   > 「按 20k 提前压缩」，而是**直接把这一轮判死**（`terminal_reason: "blocking_limit"`，
+   > `result: "Prompt is too long"`）。它把那个值当**阻断阈值**用，不是压缩触发阈值。
 
 ### 2.5 安全发现（已转化为需求）
 
@@ -303,14 +341,15 @@ src/main/
 │  ├─ scheduler.ts           每 actor FIFO 队列 + 全局并发信号量 + 跳数上限 + 路径锁
 │  ├─ turn-runner.ts         单轮编排：build → run → persist
 │  └─ interjection-service.ts 中途插话队列
-├─ adapters/
-│  ├─ agent-adapter.ts   AgentAdapter + AgentEvent（锁定的接口）
+├─ adapters/                ★ M5 已落地
+│  ├─ agent-adapter.ts   AgentAdapter + AgentEvent + TurnContext + AgentHandle（锁定的接口，§4.7）
 │  ├─ registry.ts        agentKind → adapter 工厂
 │  └─ claude/
 │     ├─ claude-adapter.ts      spawn + 控制协议 + 生命周期
 │     ├─ stream-json-parser.ts  NDJSON 行 → AgentEvent[]（含非 JSON 行容错）
-│     ├─ control-protocol.ts    interrupt / control_response
-│     └─ cli-locator.ts         解析 claude.exe（override → npm prefix → PATH）
+│     ├─ control-protocol.ts    interrupt / control_response（**ACK ≠ 完成**）
+│     ├─ cli-locator.ts         解析 claude.exe（**机制见 §4.4，不是 PATH 优先**）
+│     └─ project-context.ts     collectProjectContext 的扫描清单（§8.5c）
 ├─ process/
 │  ├─ child-registry.ts  活子进程表、pid↔turnId、进程树 kill
 │  └─ event-batcher.ts   合批刷新 + seq 分配 + 单事务落库
@@ -343,12 +382,19 @@ DB 路径：`app.getPath('userData')/code-chat.db`。**绝不用相对路径或 
 **核心 DDL（阶段一）**：
 
 ```sql
+-- ★ 本表**归迁移执行器（runner）所有**，不属于领域模型：它是迁移器自己的账本，
+-- 由 `migrations/` 的 runner 创建与写入，repository 层不得把它当成一张业务表。
+-- （M5 文档复查时补记：此前它混在核心 DDL 里，读者无从知道该由谁写。）
 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
 
 CREATE TABLE workspace (
   id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  -- ★ 空间目录名，**创建时定死、改名不动目录**（§8.3a）。迁移 0002 加入，可空。
+  -- M5 文档复查时补记：迁移 0002 已经落了这一列，而本节一直没同步 —— 属于文档缺陷。
+  dir_name TEXT,
   active_project_id TEXT REFERENCES project(id) ON DELETE SET NULL,  -- cwd 二级兜底（§8.5），非权威
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER);
+CREATE UNIQUE INDEX idx_workspace_dir_name ON workspace(dir_name);
 
 CREATE TABLE project (
   id TEXT PRIMARY KEY,
@@ -553,19 +599,38 @@ type StreamFrame =
   | { seq: number; k: 'done';        reason: 'complete'|'interrupted'|'crashed'|'budget' }
 ```
 
-> **这个帧格式还差两处，M5/M6 落地时补（2026-09-23 补记）**：
+> **这个帧格式还差四处，M5 实测之后收口（2026-09-23 补记）**：
 >
 > 1. **`error` 帧的 `code: string` 是开集，要改成闭合联合。** 我们在 §4.3a 刚刚为 IPC 错误码定下闭合联合，
 >    理由在这里同样成立：开集字符串让 UI 只能把 `message` 原样贴出来，而 `message` 是**给人看的**，
 >    不是给人判断的。闭合之后 UI 才能对每一类给出**准确**的下一步提示，而不是把「进程没起来」
 >    和「这轮超预算」渲染成同一句「出错了」。**同一份联合必须同时覆盖适配层的 `AgentEvent`**
 >    （§4.4），否则翻译层迟早长出第二张自己的映射表 —— 那就是第二个所有者。
-> 2. **`text` 帧要区分「最终正文」与「过渡叙述」。** 一个带工具调用的轮次里，CLI 会吐出**多段** text
->    （工具调用前后的说明），它们**都不是**这条消息的正文 —— 而现在的帧格式让渲染层无从分辨，
->    只能在「把最后一段当正文」和「全拼起来」之间猜一个。加 `textMode: 'interim' | 'final'`：
->    只有 `final` 进入 `messages[id]`，`interim` 留在在途缓冲里随轮次结束一起折叠。
->    > ⚠️ **这一条的形态需要 M5 实测**：CLI 的 text / tool_use 交错到底是怎样的、一段轮次里最多几段 text、
->    > 有没有可能整轮只有 `interim` 而没有 `final`。**实测之前不要写死判定逻辑**（§8.7 的同一条纪律）。
+>    > ★ **M5 已落地**：这份联合是 `AgentErrorCode`，定义在 **`src/shared/entities.ts`**（挨着 `EVENT_KINDS`）。
+>    > 取值 `cli_not_found | spawn_failed | protocol | parse | nonzero_exit | budget_exceeded | aborted`，
+>    > **命名不带 `E_` 前缀** —— 它和 `IPC_ERROR_CODES`（`envelope.ts`）**不是同一份枚举**，
+>    > M6 把 `code: z.string()` 换成这一份时**不需要第二张映射表**，也**不许**把两者合并：
+>    > 「主进程调子进程失败」与「IPC 调用失败」是两件事，合并它们等于把两个原因压成一个词。
+> 2. **`text` 帧要区分「最终正文」与「过渡叙述」。** 一个带工具调用的轮次里，CLI 会吐出**多段** text，
+>    它们**都不是**这条消息的正文 —— 而现在的帧格式让渲染层无从分辨。
+>    > **M5 实测回答（`scripts/m5-probe.ts` 的 `main` 归档，逐字可见）**：那一轮 3 个模型回合、
+>    > 内容块顺序是
+>    > `thinking → tool_use(Read) → tool_result → thinking → tool_use(Edit) → tool_result → thinking → text`。
+>    > 也就是说：**每个 assistant 消息都是「thinking 在 0 号位」，text 一次都没和 tool_use 同现**，
+>    > 整轮**只有一段 text，且在最后**。所以「text 只在收尾出现」在这次观测里成立。
+>    > ⚠️ 但**一次观测不是规律**：`textMode` 的判定逻辑**仍然不写**（§4.3 原话：实测之前不要写死）。
+>    > 第 (c) 问「有没有可能整轮只有 `interim` 而没有 `final`」**仍未回答** —— 一个被中断、或撞上
+>    > `blocking_limit` 的轮次就差一点命中它，但差一点不是命中。留给 M7，那时用真实多轮历史再测。
+> 3. ★ **`usage` 帧必须拓宽**（M6 落地）：现在只有 `in`/`out`/`costUsd`，而 §2.2 的 `usage` 还有
+>    `cache_read_input_tokens`、`cache_creation_input_tokens`、`output_tokens_details.thinking_tokens`。
+>    §4.6/§5.4 明确要求缓存命中数被记录且非零（**要把「缓存从不命中」当 bug 排查**）——
+>    帧上没地方放，**M7 的验收就做不成**。适配层的 `AgentEvent.usage` 已经带全了这三个（M5 已落地），
+>    缺的只是帧。
+> 4. ★ **`file_diff` 目前没有任何生产者。** §2.2 的映射表里**没有一行**产出它；它只能从
+>    `Edit`/`Write` 的 `tool_use.input` 合成（实测形状：
+>    `{"replace_all":false,"file_path":"…","old_string":"…","new_string":"…"}`，归档里有原文）。
+>    M5 **刻意不写合成逻辑**，只把真实输入留了档。**所有者是指名给 M6 的**：谁来合成
+>    `file_diff` 必须是一个明确的名字，不能留在「大家都以为别人会做」的状态。
 
 `seq` 是**每 session 单调计数**，在主进程缓冲时分配。它既是关联键，**也是关闭「切换空间竞态」的重放原语**。
 
@@ -632,7 +697,13 @@ type IpcResult<T> = { ok: true; data: T }
 
 `defer` 的通道返回 `E_NOT_IMPLEMENTED` 并在 `detail.milestone` 里带上里程碑号。**刻意不填桩**：`turn:send` 若返回一个伪造的 `turnId`，UI 会渲染出一条**永远不会运行的轮次** —— 比一个写明「M5/M6 才有」的报错坏得多。
 
-M3 结束时被 defer 的 6 个通道：`project:copy` / `project:clone`（M4）、`turn:send`（M5/M6）、`turn:interject` / `turn:stopAll`（M9）、`stream:resume`（M6）。另有 `turn:stop` 的 **running 分支**返回 `E_NOT_IMPLEMENTED(M9)`，而它的 `queued` 分支是真的（`markCancelled`，M2 已有）。
+M3 结束时被 defer 的 6 个通道：`project:copy` / `project:clone`（M4）、`turn:send`（**M6**）、`turn:interject` / `turn:stopAll`（M9）、`stream:resume`（M6）。另有 `turn:stop` 的 **running 分支**返回 `E_NOT_IMPLEMENTED(M9)`，而它的 `queued` 分支是真的（`markCancelled`，M2 已有）。
+
+> ★ **M5 结束时这 6 条仍然全部是 `defer`** —— `turn:send` 的「（M5/M6）」这个写法**已改回 `M6`**。
+> M5 的边界是 `src/main/adapters/**` + `src/main/process/child-registry.ts` + 探针脚本，
+> **不接 DB、不接 IPC、不接 UI**：它跑完 `turn` 表一个字节都没动。这是刻意的，
+> 因为「适配器能不能跑通一轮真对话」与「这一轮怎么落库、怎么推给界面」是两个可独立验证的问题，
+> 混在一起做就没人能说清是哪一半坏了。
 
 ### 4.4 Agent 适配层
 
@@ -677,19 +748,150 @@ spawn(claudeExePath, args, {
 })
 ```
 
+#### 4.4e ★ 补上一条**没人认领的不变量**：`run()` 恰好产出一次终态
+
+M5 评审时发现的洞：阶梯第 2/3 级是**硬杀**，**杀完没有任何 `result` 行**，也就没有 `done` ——
+而「用户点了停止」恰恰是**最常见的非正常结束路径**。没有这条不变量，那种轮次永远等不到终态，
+M9 的 `turn:stop` 也没有事件可报。
+
+**规定**：解析到终态 `result` → 用它的值；进程 `close`/`error`/`exit` 而没解析到 →
+**适配器自己合成一个 `done`**，`reason` 从退出码与阶梯级数映射（`synthesizedReason()`）。
+测试里有一条专门盯「恰好一次」的用例，含被硬杀时合成的那一次。
+
+**可测性 seam（两个）**：
+
+- `CliLaunch = { exe, preambleArgs }` —— 测试用
+  `{ exe: process.execPath, preambleArgs: ['<abs>/test/fixtures/fake-claude.cjs'] }`，
+  于是**真 spawn、真 stdio、真解析、真阶梯**，只是剧本是假的；
+- **时间注入**（`KillTimings`）—— 否则每个阶梯用例真要等 8 秒以上。
+  默认值给生产，测试一律注入更短的值。
+
+**`TurnContext` 的所有者是 `adapters/agent-adapter.ts`**（消费方定义接口），
+生产者 `domain/context-builder.ts` 是 M7。但形态现在就必须定对：**必须带结构化的
+`messages: { role, content }[]`，绝不是一个预先序列化好的 NDJSON blob** —— 这是 §4.6 整段论证的前提。
+
+> **M5 的一处明知故犯，留档在此**：M5 往 stdin 只写**一条** user 消息，由 `renderTurnInput()`
+> 把数组拍平成文本 —— 因为「CLI 的 stream-json 输入是否接受多条消息（含 assistant 角色的历史）」
+> **尚未实测**。也就是说：**M5 这一处是暂时违反 §4.6 的，不是满足它。** 记进 §8.9，别让它安静地
+> 变成 M7 的既成事实。
+
 **绝不使用 `shell: true`。** CLI 实际是**原生 `claude.exe`（约 237MB）**，`.cmd` 只是 160 字节的垫片。直接 spawn `.exe` 一次性绕开两个问题：Node ≥20.12 在无 `shell` 时 spawn `.cmd` 会抛 `EINVAL`；而 `shell: true` 会把提示词暴露给 shell 注入。
 
-`cli-locator.ts` 解析顺序：用户设置覆盖 → `npm prefix -g` 下的 `@anthropic-ai/claude-code/bin/claude.exe` → `where claude` → 失败并给出可操作的弹窗。缓存结果；若 spawn 报 `ENOENT` 则重新解析（CLI 会自更新）。
+#### 4.4a ★ `cli-locator` 的**机制**必须改（M5 本机实测，顺序不变）
 
-**中断阶梯**：
-1. stdin 写 `{"type":"control_request","request_id":"…","request":{"subtype":"interrupt"}}` —— 优雅，让 CLI 收尾在途工具
-2. ~5s 内无终态 `result` → `child.kill('SIGTERM')`
-3. 再 ~3s 仍存活 → `taskkill /PID <pid> /T /F`
+原文写的是「用户设置覆盖 → `npm prefix -g` 下的 … → `where claude`」。照字面实现是**自毁**的，
+因为本机（Windows 11 26200）实测是：
 
-> **Windows 上不存在 `SIGKILL`**，且 `child.kill()` 只终止直接子进程不终止进程树——`/T` 才是回收孙进程的关键。
+```
+where claude  →  D:\nodejs\node_global\claude        ← 无扩展名，bash 垫片
+                 D:\nodejs\node_global\claude.cmd    ← .cmd 垫片
+where npm     →  D:\nodejs\npm  /  D:\nodejs\npm.cmd  ← **没有 npm.exe**
+真身           →  D:\nodejs\node_global\node_modules\@anthropic-ai\claude-code\bin\claude.exe（237,100,192 字节）
+                 ↑ **不在 PATH 上**；同目录还有自更新残留 claude.exe.old.1790009891938
+```
+
+三个后果：① 步骤 2 要 spawn `npm`，而 `npm.exe` 不存在 → `execFile('npm')` 是 `ENOENT`；
+② `where claude` 返回的**恰好是两个必须拒绝的垫片** —— 取第一个 `ENOENT`，取第二个 `EINVAL`；
+③ 自更新会换掉文件，所以**缓存的结果会失效**。
+
+**M5 改后的机制**（顺序仍是原文那个顺序，只换实现）：
+
+1. `CODE_CHAT_CLAUDE_PATH` 环境变量覆盖（照 `CODE_CHAT_GIT_PATH` 的形，`infra/git.ts`）；
+2. **不 spawn `npm`**：从 `process.execPath` 推出 node 根，拼
+   `<nodeRoot>/node_modules/@anthropic-ai/claude-code/bin/claude.exe`；
+3. `where.exe`（真 `.exe`，安全）跨版本通用，但**只收 `.exe`**，且文件名**精确等于 `claude.exe`**
+   （`claude.exe.old.*` 必须排除）；
+4. 找不到 → **返回 `null`**，由调用方组织「人话 + 我找过哪些地方」（照 `gitSearchHint()`），
+   而不是在这里抛。spawn 报 `ENOENT` 时**重新解析**（自更新会换掉文件）。
+
+**可测性 seam**：`resolveClaude({ override, probe })` —— 默认走真实实现，测试注入假 probe。
+**刻意不把 `locateClaude` 加进 `SysCapabilities`**：那要同步改 `system-capabilities.ts` 与两个测试
+helper，而 M5 还没有调用方；等价的可测性由文件内 seam 提供。M6 接 `turn:send` 时一并做。
+
+#### 4.4b ★★ 中断阶梯在 Windows 上**必须重排**（M5 本机实测）
+
+原文的三级是：① stdin interrupt → ② `child.kill('SIGTERM')` → ③ `taskkill /PID /T /F`。
+**第 2 级与第 3 级的顺序是错的**，而错法很隐蔽：
+
+**实测三件事（Node 24 / Windows 11 26200，逐条跑通）**：
+
+1. **非 detached 的孙进程会随根一起死**（继承 Job Object）—— 所以**用普通孙进程写的测试是假绿**；
+2. **detached 的孙进程在根被杀之后仍然活着**；
+3. **根还活着时**发 `taskkill /PID <pid> /T /F`，**连 detached 的孙一起收得回来**。
+
+于是原文的第 2 级是自毁的：Windows 上没有信号，libuv 的 `child.kill('SIGTERM')` 走
+`TerminateProcess`，**立刻硬杀直接子进程**；而第 3 级的 `/T` 靠**活着的父子链**走路 ——
+根已经死了，`/T` 找不到进程，**孙进程永远不会被回收**。而 M10 的验收标准恰恰是
+「带运行中的轮硬杀应用 → 重启 → 任务管理器无残留 `claude.exe`」。
+
+**M5 改后的阶梯**（所有者：`process/child-registry.ts`）：
+
+1. stdin 写 `control_request/interrupt` → 等终态 `result`（宽限期内）
+2. **根进程还活着时**发 `taskkill /PID <pid> /T`（此时 `/T` 有效）
+3. 仍未死 → `taskkill /PID <pid> /T /F`
+4. 发第 3 步之前**必须确认 `child.exitCode === null`** —— Windows 回收 PID 很积极，
+   对着一个已死 3 秒的 PID 发 `/F` 有打错人的风险
+
+> **阶梯的可测性边界（写进了测试注释）**：SIGTERM **只能断言结果、不能断言信号送达** ——
+> 假 CLI 装了 SIGTERM 处理器在 Windows 上永远收不到（TerminateProcess）。
+> 另外，**任何测试都不许拿 `process.pid` 去驱动阶梯** —— `taskkill /T` 会杀掉测试运行器，
+> 表现出来是「框架莫名崩了」，而真正的原因在北冰洋。
+>
+> ⚠️ **一个已知缺口，记给 M10**：CLI **自己**体面退出时，它 detached 的后代会被留下 ——
+> 这不是阶梯能修的（那时没有活着的根可以 `/T`）。有一条专门的用例把这个缺口钉在原地。
+
+#### 4.4c ★★ CLI 在终态之后**不会自己退出**（M5 实测，`closeStdinOnResult`）
+
+第一轮真跑最贵的发现：终态行自报 `duration_ms=8525`，而**墙钟是 187,172ms** ——
+多出来的约 **171 秒**全在 `result` 之后。stdin 开着，CLI 就那么等着我们，最后靠 180 秒墙钟
+超时 + 中间阶梯才收回来。**那不是慢，那一轮永远不会自己结束。**
+
+修法：`closeStdinOnResult`（默认 `true`）—— **见到终态事件就 `child.stdin.end()`**。
+刻意在**终态事件**上关，而不是在写完提示词之后就关：后者会让阶梯第 1 级（往 stdin 写中断请求）
+彻底失效，等于为了省一次等待而拆掉优雅收尾的唯一通道。
+
+M5 用**成对**实测证明了因果（`npm run probe:m5 --only=stdin`）：开 = 墙钟 2900ms / 终态自报 1236ms；
+关 = 终态自报 879ms 而墙钟烧到 21824ms 被上限截断。**只跑修好的那一半证明不了任何事**。
+
+**临时提示词文件的生命周期归 `claude-adapter.ts` 所有**（§8.9-11 问的是同一个形状）：
+写完 → spawn → **进程退出后删**（失败静默）。不认领就会在 `%TEMP%` 里堆积。
+
+#### 4.4d ★ 终态成败有**三个**信号，优先级不许搞混
+
+实测撞到的原文（`--only=compact` 那一轮，逐字）：
+
+```json
+{"type":"result","subtype":"success","is_error":true,"result":"Prompt is too long",
+ "terminal_reason":"blocking_limit","num_turns":1,"duration_ms":119,"modelUsage":{}}
+```
+
+**`subtype` 说着 `success`，`is_error` 说着 `true`。** 所以：
+
+| 优先 | 信号 | 语义 | 实测取值 |
+|---|---|---|---|
+| 1 | `aborted`（**我们自己知道的事实**） | 用户按了停止 | 硬杀之后**根本没有** `result` 行，那时只有这个可用 |
+| 2 | `terminal_reason` | CLI 自己给的结论词 | `completed`、`blocking_limit` |
+| 3 | `subtype` | 名字，**会骗人** | `success`（而此时 `is_error: true`） |
+| 4 | `is_error` | CLI 对成败的明确表态 | `true` |
+| 5 | 兜底 | 「我不认识这个词」≠「它失败了」 | 落 `complete`，不落 `crashed` |
+
+顺序里第 **3 与第 4 的倒置**是刻意的：`subtype` 认不出来时**不猜**，继续往下认，
+因为把「CLI 新增了一个成功 subtype」一刀切成崩溃，代价是所有正常轮次都被报成失败。
+
+**另外两件必须一起做的**：
+- ★ **`is_error: true` 时 `result` 字段是 CLI 写的失败原因，必须往下传。**
+  M5 第一版把它解析出来然后扔了，于是「为什么失败」在本进程里一个字都不剩，
+  只剩 `done reason=crashed`。**计算了但不往下传 = 缺陷**（§4.6 那条纪律的反面）。
+- ★ **`model: "<synthetic>"` 的 assistant 消息是 CLI 自己造的**，不是模型说的。
+  上例里那条消息的正文就是 `Prompt is too long`。**若 M6/M7 照单全收，用户会看到模型
+  「开口」说了句 CLI 的报错。** 归因错误的代价与内容错误的代价一样高。
 
 两个必须围绕设计的协议事实：
 - `control_response` 的 ACK 只表示 CLI **收到了**中断，**不表示工作已结束**。要等终态 `result` 事件，不是等 ACK
+  > 实测形状：`{"type":"control_response","response":{"subtype":"success","request_id":"…","response":{"still_queued":[]}}}`。
+  > 注意 **`request_id` 在 `response` 里面，不在顶层** —— M5 第一版读的是顶层，于是永远拿到空串，
+  > 一个「看起来在工作、其实永远读不到东西」的解析函数。靠归档原文才发现。
+  > `still_queued` 是「ACK ≠ 完成」最直接的物证：CLI 一边说 `success`，一边告诉你有东西还排着队。
 - **已知 bug #94741**：中断后终态 `result` 会缺 `result` 字段。解析器必须防御性处理
 
 **进程生命周期**：
@@ -734,6 +936,19 @@ spawn(claudeExePath, args, {
 
 > 这五条在 Clowder AI 是有正式文档的（它们的 A2A 协议文档逐条对应），并且是从真实故障里收敛出来的。
 > 我们的**行为目前大体符合**，但没有任何一条是成文的 —— 这是本次对照里**性价比最高的一处补齐**。
+
+**规则一在 M5 上的第一次实际适用：`signal` 与 `interrupt` 只能留一个所有者。**
+
+§8.5c 同时锁了两样东西：`run(ctx, signal)` 和 `interrupt(handle)`。**这是同一个事实（取消）的两个所有者**，
+正是规则一要禁的。M5 的裁定：
+
+- **`signal` 是唯一的取消意图所有者** —— 谁想停，就 abort 它；
+- **`interrupt(handle)` 是它的命令式外壳**，内部就是 abort 同一个 signal，不存在第二套状态；
+- **阶梯只有一份实现**，住在 `child-registry`，由那个 signal 驱动；
+- `AgentHandle = { turnId, pid }`，**由 `child-registry` 铸造**（§4.1 已经把 `pid↔turnId` 给了它）。
+
+判据很简单：**若把 `interrupt` 删掉，取消语义仍然完整** —— 那就说明 `signal` 才是所有者。
+M5 删过了，语义完整。
 
 #### 4.5b 循环熔断：乒乓、广播风暴、升级螺旋（§3.5 的落地规则）
 
@@ -794,6 +1009,26 @@ spawn(claudeExePath, args, {
 >
 > **因此「缓存从不命中」必须当作 bug 排查，而不是既成事实。** `usage.cache_read_input_tokens` 已经在我们持久化的 `usage` 事件里，M7 要显式验证它非零。
 
+#### 4.6a ★ 「**计算了但没渲染 = 缺陷**」（M5 定纪律，M7 执行）
+
+M5 一轮真实调用里出现 857 段思考内容，而终态行上报的 `thinking_tokens` 是 **0**。
+更糟的是 M5 第一版的写法：**拿那个 0 覆盖掉了流里算出来的真数字** ——
+用户看到「本轮的思考量：0」，而它明明有 857 段。
+
+这两个错误是同一件事的两面，所以纪律也写成一件事：
+
+1. **算出来了就必须往下传。** 解析器/适配器里任何一处「取了值但没发事件、没落库、没渲染」，
+   都是缺陷 —— 它不会报错，它只是让界面安静地少显示一样东西。
+   > M5 当场又撞到一次：`is_error: true` 那轮，CLI 在 `result` 字段里写了 `Prompt is too long`，
+   > 而我们把它解析出来然后扔了 —— 于是「为什么失败」在本进程里一个字都不剩。
+2. **上报值不许覆盖实测量，尤其是 0。** `0` 的含义通常是**「没上报」**，不是「没有」。
+   正确取法是「上报值 > 0 才用上报值，否则用流内累计估算」，并把这一点写进注释 ——
+   否则下一个读代码的人会「顺手简化」回那个错的写法。
+3. **归因也要一起往下传。** `<synthetic>` 的 assistant 消息是 CLI 造的，不是模型说的
+   （§4.4d）。把它当模型的话渲染出去，是「传了但传错了」。
+
+**M7 的验收就查这个**：现存的每一个字段，要么能在界面上看到，要么在注释里写明为什么故意不显示。
+
 ### 4.7 渲染层状态管理
 
 **Zustand 5** + 三个 slice：`entity`（规范化实体 + `order[sessionId]`）、`live`（`buffers[turnId]` 在途内容）、`ui`（活跃空间/会话、未读）。
@@ -817,6 +1052,20 @@ M4 已经踩到过它的近亲：运行时的槽位与队列深度（`runtime:ge
 而派生方必须能一句话说清「我这份是从所有者那儿怎么来的、什么时候会失效」。
 **写不出来的字段就是还没有所有者** —— 它不会当场报错，它会在第一次出现不一致时变成一个查不出原因的 bug。
 M5 落地 `live` slice 时逐字段过一遍；M6 的 `event-batcher`（§8.8 规则二）是第二个必须过一遍的地方。
+
+**M5 已经落地的五个所有者**（这条规则在适配层的第一次全面适用）：
+
+| 事实 | 唯一所有者 | 谁引用、**谁不许复制** |
+|---|---|---|
+| `TurnContext`（含结构化 `messages[]`） | `adapters/agent-adapter.ts`（消费方定义接口） | 生产者是 M7 的 `domain/context-builder.ts`；**不许**有人再定义一个自己的「轮次输入」 |
+| `AgentHandle = { turnId, pid }` | `process/child-registry.ts`（铸造方） | 适配器只是持有并把它递给 `interrupt` |
+| `AgentErrorCode` | `src/shared/entities.ts`（挨着 `EVENT_KINDS`） | **与 `IPC_ERROR_CODES` 不是同一份**（§4.3 补记第 1 条），M6 换 `z.string()` 时**不需要第二张映射表** |
+| `AgentEvent` | `adapters/agent-adapter.ts` | 解析器与适配器是它的**生产者**，`event-batcher` 是**消费者**；帧（`StreamFrame`）是投影，不是副本 |
+| **`seq`** | **M6 的 `event-batcher`** | ★ **`AgentEvent` 里刻意没有 `seq`** —— §4.3 说它「在主进程缓冲时分配」，那意味着所有者是合批器。适配器带一个 `seq` 就是第二个计数器 |
+
+> 最后一行是这张表里唯一一条**否定式**的所有权：不是「谁拥有」，而是「谁**不许**碰」。
+> 它值得单列，因为往 `AgentEvent` 上加一个自增序号看起来无害，实际会让两条独立的
+> 计数轴（适配器一个、合批器一个）同时存在，而它们迟早会在一次重放或一次重连之后错位。
 
 **M4 的渲染层文件**（`src/renderer/src/`）：
 
@@ -905,6 +1154,36 @@ ipc.ts             预加载桥的类型化包装（unwrap：把失败信封翻�
 2. 用 `--autocompact <tokens>` 把阈值设到远超我们自己的压缩阈值，**让我们的压缩先触发**，CLI 的几乎永不触发
 3. 监听 `system:compact_boundary` 事件——若它真的出现，说明我们算错了窗口，**当作 bug 处理**而非正常路径
 
+#### ★ 5.3a M5 实测：第 1 条修正**用错了方向**，而且这个值不是「真实窗口」
+
+M5 的第③项实测（`npm run probe:m5 --only=compact`）把 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 设成
+**20000**（即「把一个远小于真实窗口的值告诉 CLI，看它会不会因此提前压缩」）。结果**不是压缩**：
+
+```
+system:status  → { "status": "requesting" }
+system:status  → { "status": "compacting" }
+system:status  → { "status": null, "compact_result": "failed", "compact_error": "too_few_groups" }
+result         → { "subtype": "success", "is_error": true, "result": "Prompt is too long",
+                   "terminal_reason": "blocking_limit", "num_turns": 1, "duration_ms": 119 }
+```
+
+三件事，逐条都是结论：
+
+1. **CLI 把这个值当「阻断阈值」用，不是「压缩触发阈值」。** 一轮 1.7 秒、`num_turns: 1`、
+   `input_tokens: 0` 就被判死，理由是 `Prompt is too long`。所以第 1 条修正的**方向要反过来**：
+   这个变量的作用是**告诉 CLI 上限在哪（超过就阻断）**，而不是「设小一点让它早点压缩」。
+   设小了得到的不是压缩，是**整轮失败**。
+2. **`compact_boundary` 仍未出现**（③的答案是「没有观测到」），但**压缩的失败路径**被观测到了：
+   `status: null` + `compact_result: failed` + `compact_error: too_few_groups` ——
+   「没东西可压」。这解释了为什么在小上下文的探针里永远看不到边界：**先得有一整段真实历史**。
+3. **`--autocompact` 的下限是 100k**（`--help`），所以「把阈值设到远超我们的压缩阈值」这句话
+   在小预算下**根本传不进去**。③ 要花的钱是十万 token 级的 —— 这与第 3 条修正的初衷（省钱）冲突。
+
+**M7 的修正（承接 §5.3）**：`CLAUDE_CODE_MAX_CONTEXT_TOKENS` **只在知道模型真实窗口时才设**，
+且设的是**真实值**（不是一个小值）。「真实窗口是多少」现在是 §2.4-3 那个待办 ——
+`modelUsage.contextWindow` 自报 200000，但那很可能是模型目录未命中时的兜底值。
+**在一个未知的数字上做压缩协商，比不做更危险。**
+
 ### 5.4 ⚠️ 高风险：成本是轮次的平方（§3.4）
 
 **问题**：全量注入 × 30 轮 ≈ **15.5×** 朴素开销。且**单次调用日志看起来完全正常**，只有看运行总和才会发现。
@@ -987,7 +1266,16 @@ switch (Bu([e], n).layer) {
 
 **决策：M5 用真实模型实测确认。若不回传文本，把「过程可见性」降级为「工具调用时间线 + 文件 diff + 签名折叠层」，需求表述从「看到推理」改写为「看到动作」。** 不为此切换模型或额外付费。
 
-UI 上仍保留思考面板的位置（`message_event.kind='thinking'` 照常落库），内容为空时折叠为一行状态。这样若日后模型开始回传思考内容，**UI 和持久化层不需要任何改动**——只是面板里多出内容。
+> ★ **M5 实测答案（端点限定）**：**回传了正文** —— `stream_event` 的 `content_block_delta`
+> 里 `delta.type === 'thinking_delta'` 且 `delta.thinking` 带完整文本，一轮 **857 段**。
+> 完整 `assistant` 块里也有 `thinking`（带 `signature`）。
+> **所以在「本机默认端点」下，降级路径不需要启用**，思考面板按原样做。
+> ⚠️ 但**降级路径本身要留着**：它是「模型换一个、思考就没了」的兜底，
+> 而 `§2.4-1` 已经确认模型名是自由文本 + 运行时探测。这条降级不是为当前模型写的。
+
+**另一条实测逼出来的纪律**：思考的**数量**不能信 `result.output_tokens_details.thinking_tokens`
+（它报 0，而那一轮有 857 段）。真数字在 `system:thinking_tokens`（`estimated_tokens`）里，
+而那也只是**估算**。取法见 §2.2 与 §4.6a —— **绝不用上报的 0 覆盖一个实测量**。
 
 ### 5.8 ✅ 已决定：事件保留策略
 
@@ -1016,7 +1304,7 @@ UI 上仍保留思考面板的位置（`message_event.kind='thinking'` 照常落
 | **M2** | ✅ **已完成** Schema + 迁移器 + 全部 repository。**含 `member_project` 与 `origin` 三值**（§8.4/§8.2）。 | 35 个用例全过（`node --test`，纯 Node 无 Electron，内存库）；迁移重跑幂等已验；`idx_member_router` / `idx_member_primary` 两条偏索引均已验「DB 而非应用层拒绝」。踩到的两个坑记入 §8.9。 |
 | **M3** | ✅ **已完成** IPC 契约：`registry.ts`、preload 桥、`shared/` 里的 zod schema。 | 调试点一次 `workspace:list` → `[]`。**实测见 §4.3a**：① 信封设计的必要性已用 `scripts/m3-ipc-error-probe.cjs` 在 Electron 44.4.3 上实证 —— 抛异常会丢掉 `code`/`detail`，连 message 都被套上 `Error invoking remote method '…'` 前缀；② 44 条 invoke 通道全部注册，6 条按里程碑 `defer`，漏一条 `seal()` 在启动时就抛；③ **86 个用例全过**（M2 的 35 个仍全绿 + 51 个新增），两个 tsconfig 项目 typecheck 干净。 |
 | **M4** | ✅ **已完成** 工作空间/项目 CRUD、切换器、**三种导入方式**（§8.2）、成员可见性配置，外加最小可用的角色库（含 `actor:setPersona`）。 | **138 个用例全过**（M3 的 86 个仍全绿 + 52 个新增），两个 tsconfig 项目 typecheck 干净。**实机走查 17 条断言全过**，见下方「M4 实证」。 |
-| **M5** | **`ClaudeAdapter`** + CLI 定位器：spawn、解析 stream-json、吐 `AgentEvent`、**`collectProjectContext`**（§8.5c）。 | 硬编码 prompt → 打印 text/thinking/tool delta。**四项必须在这里量**：① 冷启动时间与峰值 RSS（鲜进程 spawn 237MB 二进制，未实测）② **thinking_delta 是否真带文本**（§5.7 的降级决策依赖它）③ 是否出现 `system:compact_boundary` 事件（§5.3，若出现说明窗口算错了）④ **`--add-dir` 引入的 CLAUDE.md 与我们显式注入的是否重复**（§8.5c，用两个可区分标记字符串实测；**结论出来前不写去重逻辑**）⑤ **`--mcp-config` 动态挂载在我们这条 spawn 路径上是否可行**（§8.9-11；含 Windows 的 inline-JSON 陷阱） |
+| **M5** | ✅ **已完成** **`ClaudeAdapter`** + CLI 定位器：spawn、解析 stream-json、吐 `AgentEvent`、**`collectProjectContext`**（§8.5c）。**不接 DB、不接 IPC、不接 UI。** | **239 个用例全过**（M4 的 138 个仍全绿 + 101 个新增），两个 tsconfig 项目 typecheck 干净。真机探针 `npm run probe:m5` 六项 + 第⑦⑧项全部实测，原始 NDJSON 全文留档在 `scripts/evidence/m5-*/`。**逐项数字见下方「M5 实证」。** |
 | **M6** | 事件持久化 + `event-batcher` + 流式 UI。 | 完整对话一轮后硬杀应用，重开 → 历史完整重放，含思考、工具、diff |
 | **M7** | `context-builder` + 消息数组化 + 压缩。 | 第 2 轮能正确引用第 1 轮；强制触发阈值，确认 `<summary>`+`<recent>` 替换原始历史；**确认 `usage.cache_read_input_tokens` 非零**——若恒为 0 则缓存策略失效，需排查前缀是否字节稳定（§4.6） |
 | **M8** | 权限白名单界面 + 凭证硬底。 | 被 deny 的工具无提示直接拒绝；被 allow 的正常执行 |
@@ -1071,6 +1359,58 @@ electron.exe --remote-debugging-port=9222 --user-data-dir=<沙箱> .
 
 ---
 
+### M5 实证：真机探针（`npm run probe:m5`，2026-09-23）
+
+**端点限定语写在最前面，因为它决定下面哪些数字算数**：本轮全部实测跑在**本机当前默认凭据**下
+（一个 Anthropic 兼容端点，模型名 `deepseek-flash`，**不是 Anthropic 官方**）。
+②③⑥ 与端点相关的结论**只在该端点下成立**；①④⑤⑧ 是纯本地/纯协议行为，与端点无关。
+探针**不读、不回显任何凭据**，只把它经手的环境原样传给子进程。
+
+**花掉的钱**：`main` 一轮自报 `total_cost_usd = 0.180579`（另一轮 `0.161354`），
+`stdin` 两轮各 `0.0958`，`mcp` 两轮 `0.110825` + `0.104…`。
+⚠️ **这些数字不可信**（§2.4-2），真正的成本兜底是**每轮的墙钟上限 + 中断阶梯**，
+`--max-budget-usd 0.50` 只是第二道闸。token 数才是可对账的那一份。
+
+| # | 测什么 | 实测结果 | 端点相关 |
+|---|---|---|---|
+| ① | 冷启动与峰值 RSS | 从 spawn 到第一块 stdout **825ms**；峰值工作集 **247.8 MiB**（`tasklist` 采样）。⚠️ `ttft_ms` **不是**冷启动指标（一轮 4 个：176/174/200/3339，一次请求一个） | 否 |
+| ② | `thinking_delta` 是否真带正文 | ✅ **带**，一轮 857 段，`delta.thinking` 有完整文本 | **是** |
+| ③ | 是否出现 `system:compact_boundary` | **没有出现**，但拿到了更有用的东西：压缩的**失败路径**（`compact_result: failed` / `too_few_groups`）与**阻断路径**（把窗口设小 → `terminal_reason: blocking_limit`、`result: "Prompt is too long"`、1.7 秒判死）。**§5.3 的第 1 条修正方向因此要反过来**，见 §5.3a | **是** |
+| ④ | `--add-dir` 的 CLAUDE.md 与显式注入是否重复 | **要分两半说**：`--add-dir` 那两个目录的 CLAUDE.md **整轮从未进入上下文**（工具可及范围而已）⇒ 显式注入不会重复；而 **cwd 的 CLAUDE.md 确实被 CLI 自动注入**了（归档第 988 行，assistant，之前无任何 `tool_result`）⇒ **M7 若把 cwd/CLAUDE.md 也塞进 `systemPrompt`，内容会进两遍**。详见 §8.5c | 否 |
+| ⑤ | `--mcp-config` 动态挂载 | ✅ 文件版**与**内联 JSON **都work**：MCP server 被真 spawn、`initialize` → `tools/list` → `tools/call` 全走通（日志有原文），模型把工具返回的标记串原样抄了回来。**Windows 上 inline JSON 没有被当成路径** —— §8.9-11 的那个坑在我们这条 spawn 路径上不存在 | 否 |
+| ⑥ | `--append-system-prompt-file` 的内容角色是否真收到 | ✅ **收到了**：模型逐字复述出只存在于系统提示词里的标记串 `MK-SYS-c19f6`（它没有任何工具能读到这个串）。**file 版没有被证伪** —— 而对照材料的内联版 `--append-system-prompt` 是被实测证伪过的 | **是** |
+| ⑦ | §4.3 追问的三件事 + 真实 `Edit`/`Write` 输入 | 内容块顺序 `thinking → tool_use(Read) → tool_result → thinking → tool_use(Edit) → tool_result → thinking → text`；整轮**只有 1 段 text，在最后**；第 (c) 问（整轮只有 `interim` 没有 `final`）**仍未回答**。真实 `Edit` 输入已留档 | **是** |
+| ⑧ | 终态之后 CLI 会不会自己退出 | **成对实测**：`closeStdinOnResult: true` → 墙钟 2900ms / 终态自报 1236ms；`false` → 终态自报 879ms 而**墙钟烧到 21824ms 被上限截断**。因果关系成立，见 §4.4c | 否 |
+
+**端点自报的上下文窗口 = 200000**（终态行 `modelUsage.<model>.contextWindow`）。
+⚠️ 这不是「已知量」：CLI 同时承认自己不认识这个模型，所以 200000 很可能是**未命中模型目录时的兜底值**。
+见 §2.4-3。
+
+**这一轮探针真正值钱的地方不是那六个 ✅，是四个"我原本写错了"**：
+
+1. **④ 的第一版报告是错的。** 我拿「模型的回答里有没有这个标记串」当判据，于是印出了
+   `✅ 模型看到了 MK-DIRA/MK-DIRB` 并准备下结论「不重复」。实际上模型自己说过：只有 cwd 那份是
+   自动注入的，另外两个是它 `Glob`/`Read` 来的。**判据必须是归档里那一行的类型，不是模型的自述。**
+2. **诊断通道被淹了。** `system:thinking_tokens` 一轮 857 条，我把它当「未处理子类型」，
+   于是刷了 857 条警告 —— 「有一行我不认识」这个信号再也看不见了。
+3. **数字取错了地方。** 思考量不在 `result.output_tokens_details`（那里是 0），在流里；
+   而**拿 0 覆盖实测量**正是 §4.6a 那条纪律要禁的。
+4. **协议读错了层。** `control_response.request_id` 在 `response` **里面**，我读的是顶层 ——
+   一个「看起来在工作、其实永远读不到东西」的解析函数，靠归档原文才发现。
+
+**还有两处是「文档的既有主张被实测推翻」**，都已回写：
+- **§2.3-3 的前半句没有复现**：`system:init` 回报的是 `permissionMode: "acceptEdits"`（我们传进去的值），
+  **不是** `"default"`。结论（类型必须是 `string`）不变，理由换成了「`--help` 里确实没有 `default`」。
+- **§5.3 的第 1 条修正方向反了**：`CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是**阻断阈值**，不是压缩触发阈值。见 §5.3a。
+
+**探针自身的两条纪律**（写进脚本头部，因为踩过）：
+- **它绝不能被 `npm test` 扫到**（那是真钱）；`scripts/m5-probe.ts` 同时必须进 `tsconfig.node.json` 的
+  `include` —— 否则它会是全仓库唯一一份零静态检查的代码，而它恰恰是唯一会花真钱的代码。
+- **报告是归档的纯函数。** 改报告文案不需要再买一轮：`--archive=<file>` 就是为此加的
+  （④ 那个错的 ✅/❌ 就是这么修的，零成本）。
+
+---
+
 ## 七、验证方式
 
 **M1 关键验证**（整个持久化选型的前提）：
@@ -1082,6 +1422,19 @@ ELECTRON_RUN_AS_NODE=1 npx --yes electron@44.4.3 -e \
 ```
 打印 `[ { a: 1 } ]` 即通过。
 
+**M5 验证**（适配层的验收就是它，因为没有界面可见的变化）：
+
+```bash
+npm run probe:m5                    # 默认跑 main + mcp 两步
+npm run probe:m5 -- --only=stdin    # 终态后会不会自己退出（成对对照）
+npm run probe:m5 -- --only=compact  # ③ 压缩边界
+npm run probe:m5 -- --archive=<某个 main.ndjson>   # 重放：零成本重出报告
+```
+
+**绝不进 `npm test`**（真钱）。原始 NDJSON 落在 `scripts/evidence/m5-<时间戳>/`，
+一个字节都不改地留档 —— 它是所有结论的唯一证据来源（§8.8d 规则九）。
+结果与逐项数字见 §六 下方的「M5 实证」。
+
 **端到端验证**（阶段一完成态）：
 1. 建一个工作空间，用**三种导入方式各加一个项目**（§8.2）：原地引用一个已有目录、复制到别处、`git clone` 一个真实仓库。确认 `project.origin` 分别为 `local` / `copy` / `clone`
 2. 创建一个 actor（人设写"你是资深架构师"），引入为成员（职责写"只做架构决策"），**把主项目设为项目 A**
@@ -1089,7 +1442,7 @@ ELECTRON_RUN_AS_NODE=1 npx --yes electron@44.4.3 -e \
 4. **可见性与上下文（§8.4/§8.5c 的关键验收）**：再加一个**客服角色**，**不设主项目**，可见全部三个项目。问它"三个项目各自的技术栈是什么"。确认：① 它的 `turn.cwd` 落在空间 `scratch/`；② 它**答得出各项目的 CLAUDE.md / AGENTS.md 内容**（证明 `collectProjectContext` 生效，cwd 不再决定上下文）；③ UI 能列出本轮的上下文来源文件清单
 5. **可见性收窄**：把架构师角色的可见项目限制为只剩项目 A。确认它**不再能看到** B/C 的路径（提示词与 `--add-dir` 都收窄）。**同时确认 UI/文档没有把它描述成安全机制**（§8.4）
 6. **原地引用的安全性**：删除工作空间，确认 `origin='local'` 的那个用户目录**一个字节都没动**
-7. **观察**：思考流式输出、工具调用时间线、文件 diff、最终答复。**注意**：若 M5 确认 thinking 正文为空，则此项验收标准降级为「工具调用时间线 + 文件 diff + 最终答复」三者齐全，思考面板显示为折叠状态行（§5.7）
+7. **观察**：思考流式输出、工具调用时间线、文件 diff、最终答复。**M5 已确认 thinking 正文非空**（§5.7），所以这一项按原标准验收。⚠️ 但**降级路径的实现要留着**（模型换一个就没有思考了，§2.4-1），且**本项验收必须带上「thinking 面板里的内容不许是那个假的 0」** —— 见 §4.6a
 8. **中断**：在工具执行中途点停止，确认在途 `Edit` 被优雅收尾而非截断
 9. **持久化**：硬杀应用，重开，确认完整历史（含思考）重放
 10. **成本**：确认 UI 显示累计 token 与估算成本，且 `cache_read_input_tokens` 非零
@@ -1262,6 +1615,30 @@ CREATE UNIQUE INDEX idx_member_primary ON member_project(member_id) WHERE is_pri
 | AGENTS.md **原生支持** | 设置策略 `claude-md-or-agents-md`（默认）/ `claude-md-and-agents-md` |
 | `--project-config-root <dir>`（**隐藏**） | `Read project settings, .mcp.json and the .claude config trees from this directory rather than the working directory (for a session a host starts in a worktree of it)`。可把**配置根**与 **cwd** 解耦。隐藏 ⇒ 可能不稳定，谨慎使用 |
 
+**★ 三根枚举轴的关系（M5 定，写下来是因为它们已经长得像三份重复的枚举了）：**
+
+仓库里现在有三处「事件种类的枚举」，它们**不是**同一个东西的三份拷贝，而是**同一根轴在三个位置上的投影**：
+
+| 位置 | 是什么 | 谁写 | 谁读 |
+|---|---|---|---|
+| `entities.ts` 的 `EVENT_KINDS`（**8** 个） | **可持久化轴**：`message_event.kind` 允许存什么 | M2 定 | repository、落库 |
+| `schemas.ts` 的 `StreamFrame.k`（**9** 个） | **线上轴**：主进程往渲染进程推什么 | M3 定 | 渲染层 |
+| `message_event.kind` 的 DDL `CHECK`（**8** 个） | **落库约束**：DB 层拒绝什么 | 迁移器 | SQLite 自己 |
+
+**三者的关系必须能一句话说清**：`EVENT_KINDS` 与 DDL CHECK **是同一条轴的两种写法**
+（一个在 TS 里、一个在 SQL 里），它们**必须逐字一致**——不一致的形态是「应用层同意写、DB 拒绝」，
+而那是一个**运行时**才暴露的错误。
+
+`StreamFrame.k` 是**另一条轴**，而它多出来的那一项恰好解释了为什么：
+**`thinking_end`** —— 一个纯**在途**标记（「这段思考结束了」），它没有任何可持久化的形态。
+所以线上 9 项、可持久化 8 项，**不是漂移**。
+
+> 判据一句话：**这一项在 DB 里找得到列吗？** 找得到 → 可持久化轴，两边必须一致；
+> 找不到 → 线上轴。M6 加帧、M7 加事件时按这一句判断改哪边，**不要凭直觉往两边都加**。
+> （`EVENT_KINDS` 与 DDL 的逐字一致性**目前没有任何自动检查**：一个只在 TS 里加、
+> 没同步迁移的 kind 会一路活到第一次落库才炸。M6 落 `event-batcher` 时值得加一条启动断言，
+> 照 §4.3b 那条「通道分类必须穷尽且在启动时断言」的形。）
+
 #### 8.5b cwd 三级兜底（**每成员、每轮**解析，不是空间级）
 
 ```
@@ -1328,6 +1705,27 @@ interface AgentAdapter {
 
 **必须先测的未知项（并入 M5）**：`--add-dir` 引入的 CLAUDE.md 与**我们自己显式注入**的同一份文件**会不会重复**。若重复，需要能关闭 CLI 侧的自动加载（候选：`--setting-sources` / 环境变量 / `--bare`）。M5 用两个可区分的标记字符串实测一次即可判定，**在结论出来前不写任何"去重"逻辑**。
 
+#### ★ 8.5c-1 M5 实测结论：答案要**分两半**说
+
+（`npm run probe:m5` 的 `main` 归档，2026-09-23。判据是**归档里那一行的类型**，不是模型的自述。）
+
+| 文件 | 实测 | 对 M7 的后果 |
+|---|---|---|
+| **cwd 的 `CLAUDE.md`** | ★ **被 CLI 自动注入了**。标记串 `MK-CWD-7f31a` 第一次出现在归档第 **988** 行的一条 `assistant` 消息里，**之前没有任何 `tool_result`** —— 它在模型动手之前就在上下文里。模型自己的描述也能对上：它以「项目指令」形式、装在一条 `system-reminder` 里进来的 | ⚠️ **若 M7 把 cwd/CLAUDE.md 也塞进 `systemPrompt`，同一份内容会进两遍。** 需要一条明确的规则（注入前先看 cwd 那份？还是干脆不注入 cwd 的？）——**这是 M7 必须回答的，不是可以默认的** |
+| **两个 `--add-dir` 目录的 `CLAUDE.md`** | **整轮从未进入上下文**（两个标记串一次都没出现）。它们只对**工具**可及：模型要读得自己 `Read`/`Glob` | ✅ 显式注入**不会撞车**。§8.5c 性质 3 那句话（`--add-dir` 是工具可及范围，不是上下文来源）**实测成立** |
+
+**所以「会不会重复」的正确答案不是「会」或「不会」，而是**：
+`--add-dir` 那半边不会，**cwd 那半边会**。
+
+**一个方法论上的坑，记在这里因为它的代价很高**：M5 第一版的判据是
+「模型的回答里有没有这个标记串」—— 那是**假阳性**。`--add-dir` 给了工具访问权，
+所以模型完全可以自己去 `Read` 那个文件再复述出来，而那条路径与「CLI 自动把它注入上下文」
+是**两件完全不同的事**。第一版报告因此印出了 `✅ 模型看到了 MK-DIRA/MK-DIRB`，
+差一步就写下「不重复」这个错误结论。**自述只能当旁证，判据必须是行类型。**
+
+**顺带一个旁证**：那一轮终态行报告了 `permission_denials` 非空 —— 模型想枚举工作目录的
+**父目录**被挡了。这说明权限边界是真的在起作用，而不是纸面上的。
+
 ### 8.6 git worktree：**不作为导入机制**
 
 调研结论（用户已有目录 → agent 工作副本）明确**不采用 worktree**：
@@ -1349,6 +1747,12 @@ interface AgentAdapter {
 一个本该是「扫一眼 PATH」的动作会因此长成一整块生命周期代码，而它的失败形态又是静默的
 （拿到了版本号，误以为「这个 CLI 能跑」）。我们现在的做法是对的：`cli-locator.ts` 找 `.exe` 路径（§4.4）、
 `infra/git.ts` 的 `locateGit()` **只查 PATH、不执行 `git --version`**。**M5 起不要退化。**
+
+> ★ **M5 的实际做法（与本节对齐，也顺手去掉了一次子进程）**：`cli-locator.ts` 的判定是
+> **「文件存在 + 大小 > 0」**，一个字节都不执行它 —— 连 `--version` 都不跑。
+> 而 §4.4 原文那条「spawn `npm prefix -g`」在改版时被**删掉**了（§4.4a）：它是本节这条教训的
+> 另一个实例 —— 为了问一个「目录在哪」的问题，起了一个子进程，而那个子进程在本机**根本不存在**
+> （没有 `npm.exe`）。**能用文件系统回答的问题，不要用子进程回答。**
 
 ### 8.8 M2 实现纪律：两条被真实缺陷逼出来的规则
 
@@ -1425,12 +1829,70 @@ export interface HandlerContext { store; now(); newId(); view; sys: SysCapabilit
 
 修法是首启分支也渲染提示条（浮在右上角）。**教训比修法重要**：一个「全局唯一出口」的组件，只要有任何一个提前 `return` 的布局分支漏掉它，它就不是全局的 —— 而漏掉的那个分支，往往正是最需要它的那个（出错后回到空态）。
 
+### 8.8d M5 实现纪律：四条
+
+M5 是「第一次真的起子进程」，也是「第一次让测量结果推翻代码」。四条都不是风格偏好。
+
+**规则八：真机探针**绝不能**被测试框架扫到，但**必须**被 typecheck 扫到。**
+
+`scripts/m5-probe.ts` 会 spawn 真的 `claude.exe`、花真的钱。它要是被 `npm test` 的 glob 扫到，
+一次 `npm test` 就是几毛钱加两分钟墙钟，而且**没人会立刻发现**（测试仍然全绿）。
+所以它与 `test/**` 在目录上彻底分开，跑法只有 `npm run probe:m5`。
+
+反过来：它**必须**进 `tsconfig.node.json` 的 `include`。否则它会是全仓库唯一一份
+**零静态检查**的代码 —— 而它恰恰是唯一会花真钱的代码。一个拼错的字段名在别的文件里是
+`npm run typecheck` 的一声抱怨，在这里是「跑到一半、花了钱、才炸」。
+
+> 这两句话看着矛盾，其实是一条：**「谁在什么时候执行它」决定它该被谁检查。**
+
+**规则九：报告是归档的纯函数 —— 改报告不许再买一轮。**
+
+探针的原始 NDJSON 全文留档，报告只是它的一个视图。M5 第一版的 ④ 那一节判据写错了，
+印出了 `✅ 模型看到了 MK-DIRA/MK-DIRB`。修这个错**不需要重跑那一轮**：
+`npm run probe:m5 --archive=<file>` 从归档重新长出报告，零成本。
+**这条不是优化，是纪律**：一个需要重新花钱才能复核的结论，实际上是不复核的。
+
+**规则十：探针不许读、不许回显凭据；端点必须写在结论里。**
+
+探针 spawn 的子进程会读本机的默认凭据配置。探针自己**只报「设了没有」，绝不回显内容**
+（`reportEnvironment` 里那句 `已设置 / 未设置（不打印内容）` 是刻意的），
+也不读任何凭据文件 —— 它只把它经手的环境原样传给子进程。
+
+而**每一条端点相关的结论都必须带端点限定语**（②③⑥ …「该端点下测得」）。
+一个不带出处的实测数字比没有数字更坏：它会被当成普遍事实引用下去。
+
+**规则十一：先跑通，再相信 —— 「模型自己说的」不是证据。**
+
+④ 那个错的判据是这一条的由来。正确的判据是**归档里那一行的类型**：
+内容若来自自动注入，它第一次出现时**周围没有 `tool_result`**；若是模型自己读来的，
+**必然在某条 `tool_result` 里**。模型的自述只能当旁证 —— 因为它有工具，
+它能读到你埋的任何文件里的任何字符串，于是「它说出来了」这件事**零信息量**。
+
+**唯一可以信自述的场景**是标记串只存在于**它读不到的地方**（⑥ 的 `MK-SYS-…` 只在系统提示词里，
+模型没有任何工具能读到）—— 那时复述对了就只能是收到了。**判据要配得上证据的性质。**
+
+**规则十二：一轮**失败**的对话，不能用来否定任何东西。**
+
+重放 `compact` 归档时撞见的：那一轮被 CLI 判死（`Prompt is too long`），模型根本没得到机会回答，
+而同一套判据把这件事印成了 `❌ --append-system-prompt-file 没生效` —— **一个纯属虚构的结论，
+而且看起来非常像真的**（它带 ❌、带一句解释、还引了模型的原话「Prompt is too long」当证据）。
+
+所以报告在给出任何 ✅/❌ 之前先看**这一轮的终态**：`is_error: true` 或
+`terminal_reason` 含 block/limit/error/fail → **整节跳过**，只印终态事实。
+**「没测到」与「测到是坏的」是两回事**（`check()` 的三态就是为此而设）——
+而**「这一轮根本没跑成」是第三种**，它比前两种都更该被单独对待。
+
 ### 8.9 待办
 
 1. ~~设计文档落地~~ ✅ 已完成：已落到仓库 `docs/design.md`，与代码一起版本化。此后**以仓库内这份为准**，Claude Code 计划目录里的那份是副本。
    > ~~⚠️ 仓库仍未 `git init`~~ ✅ **M3 之前已完成**：`git init` + 基线提交（M0–M2，34 文件）。此后**每个里程碑一个 commit**。
 2. ~~§4.2 DDL 同步~~ ✅ 已完成：`member_project` 已加入、`working_paths_json` 已移除、`project.origin` 已扩为三值。
-3. **M5 的两个未知项待实测**：`--add-dir` 的 CLAUDE.md 是否与显式注入重复（§8.5c）；thinking_delta 是否带正文（§5.7）。
+3. ~~**M5 的两个未知项待实测**：`--add-dir` 的 CLAUDE.md 是否与显式注入重复（§8.5c）；thinking_delta 是否带正文（§5.7）。~~
+   ✅ **M5 已实测**：`--add-dir` 那半边**不重复**、cwd 那半边**会重复**（§8.5c-1，结论要分两半说）；
+   `thinking_delta` **真带正文**（一轮 857 段）。
+   > ★ 但**派生出一条新的待办给 M7**：既然 cwd 的 `CLAUDE.md` 会被 CLI 自动注入，
+   > M7 必须明确回答「`collectProjectContext` 还要不要注入 cwd 那一份」。
+   > **不能靠默认**：默认就是内容进两遍。
 4. **§5.5a 的缺口需要产品决策**：默认自主模式下，混淆 shell 命令可绕过 deny 列表。若要闭合，唯一完整手段是 **PreToolUse hook**（§5.5a 表）。阶段一不做，但需在 UI 上以准确措辞呈现（"能静态判定的路径是硬的"），不要把 deny 列表说成"安全"。
 
 **M4 带出来的待办**：
@@ -1447,22 +1909,46 @@ export interface HandlerContext { store; now(); newId(); view; sys: SysCapabilit
 
 **2026-09-23 对照 Clowder AI 带出来的待办**（设计规则已定，落地时执行）：
 
-11. **`--mcp-config` 动态挂载的实测**（M5 第⑤项）。三个问题要一次问完：
-    ① 我们的 spawn 路径（直接 spawn `claude.exe`、`stdio: ['pipe','pipe','pipe']`、`--no-session-persistence`）下 `--mcp-config` 是否正常工作；
-    ② **Windows 上 CLI 会把 inline JSON 当成文件路径** —— 对照材料踩过这个坑，Windows 分支是改成写临时文件的；
-    ③ 那个临时文件**什么时候可以删**（子进程读完即可，还是等轮次结束？），以及它里面**能不能放凭证**。
-    > 第 ③ 问是关键，且**先于**「要不要做回传通道」这个决策。若要加回传通道，凭证的落点只有两种：环境变量，
-    > 或一个 `0600` 的文件 —— **写进提示词是最坏的一种**。对照材料里同时存在「不要把 callback token 暴露给 `curl`」的
-    > 文档，和「把 token 字面内联进 curl 命令写进系统提示」的代码，两者在同一个仓库里并存且没有调和说明；
-    > 而且那个仓库的 `SECURITY.md` 里检索 `callback` **零命中** —— 这条通道从未进入它的安全文档。
+11. ~~**`--mcp-config` 动态挂载的实测**（M5 第⑤项）。~~
+    ✅ **M5 已实测，三个问题全有答案**：① **正常工作** —— 在我们这条 spawn 路径
+    （直接 spawn `claude.exe`、`stdio: ['pipe','pipe','pipe']`、`--no-session-persistence`）下，
+    MCP server 被真的 spawn、`initialize → tools/list → tools/call` 全走通，工具返回值被模型原样复述；
+    ② **inline JSON 在 Windows 上没有被当成路径** —— 文件版与内联版**都成功**，
+    所以对照材料那个坑在我们这里不存在，**不必绕道临时文件**；
+    ③ 临时文件因此**不必要**（若日后仍要写，它的生命周期照 §4.4c 的 `--append-system-prompt-file` 办：
+    写完 → spawn → 进程退出后删）。
+    > 第 ③ 问剩下的那一半（**配置文件里能不能放凭证**）**仍然有效且尚未回答**，且**先于**「要不要做回传通道」
+    > 这个决策。若要加回传通道，凭证的落点只有两种：环境变量，或一个 `0600` 的文件 —— **写进提示词是最坏的一种**。
+    > 对照材料里同时存在「不要把 callback token 暴露给 `curl`」的文档，和「把 token 字面内联进 curl 命令
+    > 写进系统提示」的代码，两者在同一个仓库里并存且没有调和说明；而且那个仓库的 `SECURITY.md` 里检索
+    > `callback` **零命中** —— 这条通道从未进入它的安全文档。
     > 对我们是明确的提示：**这条通道的能力边界要在实现之前就写清楚，不能靠事后补文档。**
-12. **NDJSON 解析器必须有单行长度上限**。§2.3 列了四个坑，但没列这个：解析器通常是 `pending += chunk`
-    然后按 `\n` 切分，**若不设上限，一个不含换行的大输出就能把内存吃干**（工具结果里一段巨大的单行
-    base64 / 日志极易命中）。做法：`pending` 超过阈值（如 8MB）就**放弃该行 + 记一条诊断 + 继续解析下一行**，
-    既**不要**崩，也**不要**无限缓存。M5 写解析器时一并做（对照材料在这一处**也没有**防护，属于双方共同的缺口）。
-13. **压缩事件：`system:compact_boundary` 若真出现，是 bug 还是一类事件？** §5.3 现在的写法是
-    「若它真的出现，说明我们算错了窗口，当作 bug 处理」。这个判断需要 M5 实测校准：对照材料是靠
-    **观测 `usedTokens` 在两轮之间掉超过 60%** 来推断「上下文被压缩过」，并据此**重新注入被压缩掉的控制状态** ——
-    也就是说在它们那里，压缩是一个**可观测、且需要专门应对的常态事件**。我们要确认的是：在我们的参数组合下
-    （§5.3 的三条修正）它到底还会不会出现；若会出现，就该按**一类事件**处理（落库 + UI 如实显示「上下文已压缩」），
-    而不是当成 bug 静默掉。M5 的第③项实测直接回答这个问题。
+12. ~~**NDJSON 解析器必须有单行长度上限**。~~
+    ✅ **M5 已落地**：`MAX_LINE_CHARS = 8MB`，超限即**放弃该行 + 记一条诊断 + 继续解析下一行**，
+    既**不崩**也**不无限缓存**。有一条专门的用例（含「从行中间切断」的形态）。见 §2.3-6。
+13. ~~**压缩事件：`system:compact_boundary` 若真出现，是 bug 还是一类事件？**~~
+    ⚠️ **M5 的第③项实测给出了半个答案，而另外半个换了形状。**
+    **`compact_boundary` 一次都没出现**（§5.3a）—— 但原因不是「我们没有压缩」，
+    而是「**探针的上下文太小，没东西可压**」：CLI 的压缩尝试以 `too_few_groups` 失败。
+    也就是说 §5.3 原来的判断（「出现即算错窗口」）**至今没有被验证也没有被推翻** —— 它需要
+    **一整段真实的多轮历史**才能测，而那正是 M7 才有的东西。
+    **M7 的验收里要补这一条**：等真实历史长到触发压缩时，再判定它是一类事件还是一个 bug。
+    在那之前，`compact_boundary` 在解析器里**只观测、不处理**（发一条 info 诊断 + 一个布尔）。
+
+**M5 带出来的待办**：
+
+14. ★ **`system:status` 带 `compact_result: failed` 时，要不要让用户看见？**
+    CLI 会如实告诉你「压缩失败了、原因是 `too_few_groups`」，而**压缩失败意味着上下文即将失控**。
+    M5 只把它记成一条 `warn` 诊断（§2.3-5）。M7 做压缩协商时要想清楚：这一条该不该升格成
+    UI 上的可见提示 —— 它比大多数警告都更值得被看见。
+15. ★ **`cwd/CLAUDE.md` 的重复注入**（§8.5c-1）。M7 必须明确回答「还要不要注入 cwd 那一份」。
+16. ★ **`AgentEvent` 的 `usage` 要拓宽到帧上**（§4.3 补记第 3 条）。适配器已经带全了
+    `cacheRead`/`cacheCreation`/`thinkingTokens`，缺的只是 `StreamFrame`。M6 落地 ——
+    不拓宽，M7 那条「缓存命中必须非零」的验收就做不成。
+17. ★ **`file_diff` 没有生产者**（§4.3 补记第 4 条）。**指名给 M6**：从 `Edit`/`Write` 的
+    `tool_use.input` 合成。M5 已经把真实输入留档（形状见 §4.3 补记）。
+18. ★ **`model: "<synthetic>"` 的 assistant 消息不许当成模型的话**（§4.4d）。
+    M6 落库、M7 装配历史时都要避开它 —— 否则用户会看到模型「开口」说了句 CLI 的报错。
+19. **`TurnContext.messages` 的多条消息形态尚未实测**（§4.4e）。M5 只往 stdin 写**一条** user 消息，
+    这是**暂时违反 §4.6** 的。M7 装配真实历史前必须先测「CLI 的 stream-json 输入是否接受多条消息
+    （含 assistant 角色的历史）」，否则 §4.6 那套缓存论证会落在一个没验证过的前提上。

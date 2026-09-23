@@ -52,7 +52,12 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
     if (turn.status === 'running') {
       throw new AppError(
         'E_NOT_IMPLEMENTED',
-        `通道 turn:stop 对运行中的轮次尚未实现（计划在 M9）：需要先 SIGINT、超时后再硬杀进程树`,
+        // ⚠️ 这句话在 M5 之后已经不准了：**Windows 上没有 SIGINT/SIGTERM 可用**
+        // （libuv 的 `child.kill()` 走 TerminateProcess，直接硬杀直接子进程，
+        //  而 `taskkill /T` 靠活着的父子链走路 —— 先杀根会让孙进程永远收不回来）。
+        // M5 定的阶梯是「stdin 中断 → 根还活着时 `taskkill /T` → `/T /F`」，
+        // 完整理由与实测见 docs/design.md §4.4b。M9 落地时照那一节做，不要照这句话做。
+        `通道 turn:stop 对运行中的轮次尚未实现（计划在 M9）：走 docs/design.md §4.4b 的中断阶梯`,
         { turnId, pid: turn.pid, milestone: 'M9' }
       )
     }

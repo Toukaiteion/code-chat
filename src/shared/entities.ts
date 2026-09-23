@@ -49,6 +49,52 @@ export const EVENT_KINDS = [
 ] as const
 export type EventKind = (typeof EVENT_KINDS)[number]
 
+/**
+ * 适配层错误的**闭合联合**（§4.3 补记 ①）。
+ *
+ * ⚠️ **这不是 `IPC_ERROR_CODES`（`ipc/envelope.ts`）的第二份，两者是不同的所有者，绝不要合并。**
+ * 它们回答的是两个不同的问题：
+ * - `IPC_ERROR_CODES` 回答「**这次 IPC 调用**为什么没成」——`E_NOT_FOUND`、`E_CONFLICT` 是仓储层的语义；
+ * - `AGENT_ERROR_CODES` 回答「**那个 agent 进程**出了什么事」——`nonzero_exit`、`budget_exceeded`
+ *   是子进程的处境，仓储层根本不知道。
+ *
+ * 之所以放在 `entities.ts`：它是唯一同时被两个 tsconfig 项目读、又不在 IPC 层里的文件，
+ * 于是适配层（`src/main/adapters/**`）与线上格式（`shared/ipc/schemas.ts` 的 `error` 帧）
+ * **可以指着同一份定义**。§4.3 补记 ① 的诉求正是这个：闭合之后 UI 才能对每一类给出准确提示，
+ * 而不是把「进程没起来」和「这轮超预算」渲染成同一句「出错了」。
+ *
+ * 命名刻意**不带 `E_` 前缀**，就是为了让人一眼看出它和 `IPC_ERROR_CODES` 不是一套。
+ */
+export const AGENT_ERROR_CODES = [
+  /** 找不到 CLI 可执行文件（`cli-locator` 全试过了）。 */
+  'cli_not_found',
+  /** 定位到了但进程起不来（ENOENT 复现 / EINVAL / EPERM）。 */
+  'spawn_failed',
+  /** 流内容违反了协议预期（例如整轮没有 `system:init`）。 */
+  'protocol',
+  /** 终态行解析不出来 —— 于是这一轮的结果**不可知**，只能如实报这个。 */
+  'parse',
+  /** 进程非零退出，且没等到终态 `result`。 */
+  'nonzero_exit',
+  /** 撞上 `--max-budget-usd` 硬闸。⚠️ CLI 用哪个 subtype 报这件事**尚未实测**（M5 探针）。 */
+  'budget_exceeded',
+  /** 我们自己按用户意图中断了它。 */
+  'aborted'
+] as const
+export type AgentErrorCode = (typeof AGENT_ERROR_CODES)[number]
+
+/**
+ * 一轮**如何结束**的闭合联合（§4.3 的 `done` 帧）。
+ *
+ * 与 `AGENT_ERROR_CODES` 同样的理由放在这里：它同时是 `AgentEvent.done.reason`
+ * 和 `StreamFrame.done.reason`，两处必须指的是同一组值。
+ *
+ * 注意它**刻意只有四个值**：`failed` 不在这里 —— 失败是通过先发一个 `error` 事件、
+ * 再发 `done` 表达的（`done` 只回答「结束了没、怎么结束的」）。
+ */
+export const TERMINAL_REASONS = ['complete', 'interrupted', 'crashed', 'budget'] as const
+export type TerminalReason = (typeof TERMINAL_REASONS)[number]
+
 /** 历史注入方式（§4.6 压缩）。 */
 export const INJECT_MODES = ['full', 'summary', 'excluded'] as const
 export type InjectMode = (typeof INJECT_MODES)[number]
