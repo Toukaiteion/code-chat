@@ -30,19 +30,19 @@ export function registerAll(r: Registry, ctx: HandlerContext): void {
   // ───────────────────────────────────────────────────────────
   // 尚未实现 —— **不填桩，返回 E_NOT_IMPLEMENTED 并带上里程碑号**。
   //
-  // ★ 为什么不做成「返回假数据」：`turn:send` 若回一个伪造的 turnId，
-  // UI 会照常渲染出一条**永远不会运行的轮次**，用户看到的是「已发送、正在思考」，
-  // 而实际上什么都没有发生。一个写明「M5/M6 才有」的报错，比一个安静的谎言好得多。
+  // ★ 为什么不做成「返回假数据」：`turn:stopAll` 若回一个伪造的「已停止 3 个」，
+  // UI 会显示「已全部停止」而那几个 claude 进程还在改用户的文件。
+  // 一个写明「M9 才有」的报错，比一个安静的谎言好得多。
   //
   // 这些通道的**入站载荷依然过 zod**（registry 的校验在实现检查之前），
-  // 所以 UI 连「参数写错了」都能在 M5 之前先发现。
+  // 所以 UI 连「参数写错了」都能先发现。
+  //
+  // ★ M6a 从这里移出了两条：`turn:send`（调度器 + 合批器已就位）与
+  //   `stream:resume`（帧缓冲的所有者是 `process/event-batcher.ts`）。
+  //   移出时**必须同时**改 `test/ipc/registry.test.ts` 里那张「未实现清单」——
+  //   那条用例正是为了让这份名单不会悄悄过时。
   // ───────────────────────────────────────────────────────────
 
-  // 需要调度器（§4.5：Semaphore + 每 session FIFO 队列 + 持久化排队）。
-  r.defer('turn:send', 'M5/M6', '需要 ClaudeAdapter 与调度器；伪造 turnId 会让 UI 渲染一条永不运行的轮次')
   r.defer('turn:interject', 'M9', '插话队列：在当前轮结束后执行')
   r.defer('turn:stopAll', 'M9', '需要先有「停止运行中的轮次」')
-
-  // 事件重放的读取端：表已就位，但帧的来源（event-batcher 的环形缓冲）M6 才有。
-  r.defer('stream:resume', 'M6', '需要的帧缓冲由 event-batcher 维护')
 }

@@ -38,6 +38,12 @@ import type { TerminalReason } from '../../../shared/entities.ts'
  *
  * 坑 1 与超长行产生的都是 `AgentDiagnostic`，**不是** `error` 事件。
  * 一行 `[claude-code:unrecognized_model]` 不该让 UI 弹「出错了」。
+ *
+ * ⚠️ 但反过来**不成立**：不是所有错误都能降级成诊断。
+ * 「CLI 自报本轮失败」（`is_error: true`）与「CLI 自己造的 assistant 消息」这两件事
+ * **必须**走 `error` 事件 —— 前者是因为诊断不落库（重启后那句话一个字都不剩），
+ * 后者是因为它一旦落库就会变成「模型开口说了句 CLI 的报错」。
+ * 两条的详细理由分别在 `onResult` 与 `isSyntheticAssistant` 上。
  */
 
 /**
@@ -339,9 +345,56 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     diag('warn', 'unknown-stream-event', `未处理的流事件：${kind ?? '(缺失)'}`)
   }
 
+  /**
+   * ★ **CLI 自己造的 assistant 消息** —— 一个实测到的、会污染归因的形态。
+   *
+   * 归档逐字（`scripts/evidence/m5-2026-09-23T13-05-15-211Z/compact.ndjson`）：
+   *
+   * ```json
+   * {"type":"assistant","message":{"model":"<synthetic>", …,
+   *   "content":[{"type":"text","text":"Prompt is too long"}]},
+   *  "error":"invalid_request","is_api_error_message":true}
+   * ```
+   *
+   * `model` 是字面量 `"<synthetic>"` —— 没有哪个真模型叫这个名字。这不是模型说的话，
+   * 是 CLI 把它自己的报错包装成了一条 assistant 消息。
+   *
+   * **M5 的解析器照单全收**：`onAssistant` 的兜底分支（整轮没见过增量时由完整块补发文本）
+   * 会把它发成一条 `text_delta`。今天它只活在内存里所以无害；**M6a 一落库，
+   * 它就会变成一条 `text` 事件 —— 用户看到的是模型「开口」说了句 CLI 的报错。**
+   * §4.4d 与 §8.9-18 点名的正是这件事：归因错误的代价与内容错误的代价一样高。
+   *
+   * 两个判据都认：`model === '<synthetic>'` 是它的**身份**，
+   * `is_api_error_message === true` 是 CLI 的**自述**。任一成立就不当模型的话 ——
+   * 宁可漏判一个（顶多少显示一段文本，且诊断里留着），不可错判一个。
+   */
+  function isSyntheticAssistant(raw: Json, message: Json | null): boolean {
+    if (message && str(message.model) === '<synthetic>') return true
+    return raw.is_api_error_message === true
+  }
+
   function onAssistant(raw: Json): void {
     const message = asObj(raw.message)
     const content = message && Array.isArray(message.content) ? message.content : []
+
+    if (isSyntheticAssistant(raw, message)) {
+      // 正文**不丢弃**：它交回给失败路径（终态行的 `result` 里通常是同一句话），
+      // 由 `onResult` 落成 `error` 事件。这里只是不把它算成模型说的话。
+      const text = content
+        .map((item) => {
+          const o = asObj(item)
+          return o && str(o.type) === 'text' ? (str(o.text) ?? '') : ''
+        })
+        .filter((t) => t !== '')
+        .join('\n')
+      diag(
+        'warn',
+        'synthetic-assistant',
+        `CLI 自己造的 assistant 消息（model="<synthetic>"），已按报错处理而非模型发言：${text || '(无正文)'}`
+      )
+      return
+    }
+
     for (const item of content) {
       const o = asObj(item)
       if (!o) continue
@@ -436,11 +489,19 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
       // **`subtype` 可以是 `"success"` 而 `is_error` 是 `true`**。那一轮的 `result` 是
       // CLI 自己写的失败原因，原文 `Prompt is too long`，伴生 `terminal_reason: "blocking_limit"`。
       //
-      // 我把它解析出来、然后**扔掉了** —— 于是「这一轮失败了」只剩一个 `done reason=crashed`，
-      // 人话没了，而那句话恰恰是唯一能解释为什么的东西。
+      // M5 第一版把它解析出来、然后**扔掉了** —— 于是「这一轮失败了」只剩一个
+      // `done reason=crashed`，人话没了，而那句话恰恰是唯一能解释为什么的东西。
       // 这正是 §4.6 那条纪律的反面：**计算了但不往下传 = 缺陷**。
-      // 光有原因还不够：没有它，M6/M7 只能对着 `crashed` 干瞪眼。
+      //
+      // ★ **M6a 补上终点**：它必须变成**一条 `error` 事件**，落在用户看得见的地方
+      // （`message_event.kind='error'` + `turn.error_text`）。
+      // M5 只到了一条诊断，而诊断**不落库**（`EVENT_KINDS` 里没有这一类）——
+      // 也就是说那句话在进程重启后一个字都不剩。
+      //
+      // `fatal: true`：这一轮就结束在这里，紧接着的 `done` 是它的结局。
+      // 码取 `cli_reported` —— 为什么不能塞进前七个，见 `entities.ts` 里那一段。
       diag('warn', 'cli-reported-error', `CLI 自报本轮失败：${resultText}`)
+      emit({ k: 'error', code: 'cli_reported', message: resultText, fatal: true })
     }
 
     sawResult = true

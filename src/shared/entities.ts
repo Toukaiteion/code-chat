@@ -78,6 +78,30 @@ export const AGENT_ERROR_CODES = [
   'nonzero_exit',
   /** 撞上 `--max-budget-usd` 硬闸。⚠️ CLI 用哪个 subtype 报这件事**尚未实测**（M5 探针）。 */
   'budget_exceeded',
+  /**
+   * ★ **CLI 自报本轮失败**（终态行 `is_error: true`），原因逐字在 `message` 里。
+   *
+   * **M6a 新增的第 8 个取值** —— 它是 §4.4d 单独花一节写下的那个形态，不是边角料：
+   *
+   * ```
+   * {"type":"result","subtype":"success","is_error":true,"result":"Prompt is too long",
+   *  "terminal_reason":"blocking_limit", …}
+   * ```
+   *
+   * 为什么不能塞进已有的七个（这是加值的**全部**理由，逐条对过）：
+   * - `budget_exceeded` 说的是**我们**设的那道 `--max-budget-usd` 闸 —— 上面这轮
+   *   撞的是 API 的上下文长度上限。把它们并成一个码，UI 会给出「调高预算」这种
+   *   **照着做也不会有用**的下一步提示。
+   * - `nonzero_exit` 说的是「进程非零退出」—— 上面这轮进程退了 0（它如实汇报了失败）。
+   * - `protocol` / `parse` 说的是「我们读不懂 CLI 的流」—— 这里我们读得懂，
+   *   而且 §4.4d 说这个形态**是预期的**，不是异常。
+   *
+   * 合起来用一句话说清：**前七个码说的是「进程出了什么事」，这一个说的是
+   * 「进程明确告诉你这一轮没成，但它属于哪一类只有它自己知道」**。
+   * 缺了它，「为什么失败」就又只剩一个 `done reason=crashed` ——
+   * 而 §4.6 规则一（算出来了就必须往下传）正是为这种事定的。
+   */
+  'cli_reported',
   /** 我们自己按用户意图中断了它。 */
   'aborted'
 ] as const

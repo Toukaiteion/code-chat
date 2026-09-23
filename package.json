@@ -14,6 +14,9 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "node --test \"test/**/*.test.ts\"",
     "probe:m5": "node scripts/m5-probe.ts",
+    "walk:m6a": "npm run build && node scripts/m6a-pipeline-walkthrough.ts",
+    "walk:m6a:dry": "npm run build && node scripts/m6a-pipeline-walkthrough.ts --dry",
+    "walk:m6a:replay": "node scripts/m6a-pipeline-walkthrough.ts",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
   },

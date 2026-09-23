@@ -644,3 +644,114 @@ test('压缩**成功**时是 info，不是警告 —— 三态不许合并', () 
   assert.ok(!f.warnTags.includes('compact-failed'), '成功不该报警')
   assert.ok(f.diagnostics.some((d) => d.tag === 'compact-result'), '但也要留档')
 })
+
+// ─────────────────────────────────────────────────────────────
+// ★ M6a 回归：`<synthetic>` 与失败原因的终点
+//
+// 两处的夹具都是 `scripts/evidence/m5-2026-09-23T13-05-15-211Z/compact.ndjson`
+// 的**原文**（第 5 行与第 6 行）。证据 → 回归用例，不再花一分钱。
+//
+// 为什么不能"提一个同形状的"：这两条要证的判据恰好藏在两个字段里 ——
+// `model` 的字面量 `"<synthetic>"`，以及终态行的 `subtype:"success"` 与
+// `is_error:true` **互相矛盾**这一事实。手搓的行不会不小心带上那个矛盾。
+// ─────────────────────────────────────────────────────────────
+
+/** 归档第 5 行，逐字。 */
+const ARCHIVE_SYNTHETIC_ASSISTANT = {
+  type: 'assistant',
+  message: {
+    id: 'aba77165-7bcf-4fa7-b9df-3b79a7cdf168',
+    model: '<synthetic>',
+    role: 'assistant',
+    stop_reason: 'stop_sequence',
+    type: 'message',
+    content: [{ type: 'text', text: 'Prompt is too long' }],
+    usage: { input_tokens: 0, output_tokens: 0 }
+  },
+  parent_tool_use_id: null,
+  session_id: '93adecc1-2bc4-4ff7-b82b-3df1dd371bbb',
+  uuid: '66cde6f5-4204-43b0-b6d6-98fe1954085e',
+  timestamp: '2026-09-23T13:05:16.215Z',
+  error: 'invalid_request',
+  is_api_error_message: true
+}
+
+/** 归档第 6 行，逐字（只留这一轮用得到的字段）。 */
+const ARCHIVE_RESULT_BLOCKING = {
+  type: 'result',
+  subtype: 'success',
+  is_error: true,
+  result: 'Prompt is too long',
+  terminal_reason: 'blocking_limit',
+  num_turns: 1,
+  duration_ms: 119,
+  total_cost_usd: 0,
+  usage: { input_tokens: 0, output_tokens: 0, output_tokens_details: { thinking_tokens: 0 } },
+  modelUsage: {}
+}
+
+test('★★ `<synthetic>` 的正文**绝不**变成模型的话 —— 一条 text 事件都不许有（归档原文）', () => {
+  /**
+   * 这是 M5 修掉、M6a 必须有回归的一条**真缺陷**：`onAssistant` 的兜底分支
+   * （整轮没见过增量时由完整块补发文本）把 CLI 自己的报错当成了模型说的话。
+   *
+   * 判决标准不是"代码里有个 if" ——而是**事件流里没有 text_delta**。
+   * 断言看事件、不看实现，因为它要防的正是有人在别处再补一条路径把它放出来。
+   */
+  const f = feed([ndjson(INIT, ARCHIVE_SYNTHETIC_ASSISTANT, ARCHIVE_RESULT_BLOCKING)])
+
+  assert.deepEqual(of(f.events, 'text_delta'), [], '★ 用户看到的必须是「这一轮失败了」，不是「模型说了句报错」')
+  assert.ok(f.warnTags.includes('synthetic-assistant'), '判据是 `model === "<synthetic>"`，要有迹可循')
+  const hit = f.diagnostics.find((d) => d.tag === 'synthetic-assistant')
+  assert.match(hit?.message ?? '', /Prompt is too long/, '正文不丢弃 —— 它要交回失败路径')
+})
+
+test('★ `is_error` 的正文必须变成一条 `error` 事件（M6a 补上的终点）', () => {
+  /**
+   * M5 把这句 `result` 解析出来、记了一条诊断、**然后扔了**。诊断不落库
+   * （`EVENT_KINDS` 里没有这一类），所以进程一重启，那句话就一个字都不剩 ——
+   * 用户只能看到「这一轮 crashed」，而"为什么"没了。
+   *
+   * M6a 的终点是 `message_event.kind='error'` + `turn.error_text`（后者由 runner 写）。
+   * 这里验前半段：**事件流里有一条带原文的 error**。
+   */
+  const f = feed([ndjson(INIT, ARCHIVE_RESULT_BLOCKING)])
+
+  const errs = of(f.events, 'error')
+  assert.equal(errs.length, 1, '失败原因必须进事件流，且恰好一条')
+  assert.equal(errs[0].message, 'Prompt is too long', 'CLI 的原话一个字不许改')
+  assert.equal(errs[0].code, 'cli_reported', '码取自 AGENT_ERROR_CODES —— CLI 自述的失败不属于前七个')
+  assert.equal(errs[0].fatal, true, '这一轮就结束在这里')
+  assert.equal(done(f.events).reason, 'crashed', '连同终态原因一起给出')
+})
+
+test('`is_api_error_message` 单独成立时也拦（两个判据是「或」，不是「且」）', () => {
+  // 第二个判据是 CLI 的**自述**。留它是因为「模型名叫 `<synthetic>`」这件事
+  // 万一哪天改了名，我们仍然不该把一条自述的 API 报错当成模型发言。
+  const f = feed([
+    ndjson(
+      INIT,
+      {
+        type: 'assistant',
+        message: { model: 'claude-sonnet-5', content: [{ type: 'text', text: '限流了' }] },
+        is_api_error_message: true
+      },
+      RESULT_OK
+    )
+  ])
+  assert.deepEqual(of(f.events, 'text_delta'), [])
+  assert.ok(f.warnTags.includes('synthetic-assistant'))
+})
+
+test('正常的完整块补发路径**没有**被这两条判据误伤（反向对照）', () => {
+  // 反向对照是必须的：上面两条如果实现成"凡是没有增量的 assistant 都不发"，
+  // 它们照样会绿 —— 而那是把一个真模型的话也吞掉了。
+  const f = feed([
+    ndjson(INIT, { type: 'assistant', message: { model: 'claude-sonnet-5', content: [{ type: 'text', text: '我来说一句' }] } }, RESULT_OK)
+  ])
+  assert.deepEqual(
+    of(f.events, 'text_delta').map((e) => e.text),
+    ['我来说一句']
+  )
+  assert.ok(!f.warnTags.includes('synthetic-assistant'), '真模型的话不是 synthetic')
+})

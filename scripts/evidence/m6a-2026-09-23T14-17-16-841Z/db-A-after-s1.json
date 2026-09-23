@@ -1,0 +1,369 @@
+{
+  "workspace": [
+    {
+      "id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "name": "Nova",
+      "active_project_id": null,
+      "created_at": 1790173037986,
+      "updated_at": 1790173037986,
+      "archived_at": null,
+      "dir_name": "Nova"
+    },
+    {
+      "id": "2e8b4c3d-ae8b-4623-9bff-bd567c6f9905",
+      "name": "Vega",
+      "active_project_id": null,
+      "created_at": 1790173038004,
+      "updated_at": 1790173038004,
+      "archived_at": null,
+      "dir_name": "Vega"
+    }
+  ],
+  "project": [
+    {
+      "id": "9195743a-26be-499f-b91c-0943c1dbdd82",
+      "workspace_id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6a\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790173037993,
+      "last_opened_at": null
+    },
+    {
+      "id": "a1d6a46f-9f0c-4d86-a3fa-383bfcd28c80",
+      "workspace_id": "2e8b4c3d-ae8b-4623-9bff-bd567c6f9905",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6a\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790173038008,
+      "last_opened_at": null
+    }
+  ],
+  "actor": [
+    {
+      "id": "c6deb644-d6da-457c-83c9-e36871269f6c",
+      "name": "Atlas",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6a\\persona.md",
+      "persona_hash": "e2f56f2c5b34d4780dcd19de020e0015523140173694e18009a9c045b5f23f4a",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790173037996,
+      "updated_at": 1790173037996
+    }
+  ],
+  "workspace_member": [
+    {
+      "id": "716703ff-75d9-454e-81fa-d13865a2d1ad",
+      "workspace_id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "actor_id": "c6deb644-d6da-457c-83c9-e36871269f6c",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790173037998,
+      "updated_at": 1790173037998
+    },
+    {
+      "id": "06652556-6b69-4ee7-8aca-368826a08e52",
+      "workspace_id": "2e8b4c3d-ae8b-4623-9bff-bd567c6f9905",
+      "actor_id": "c6deb644-d6da-457c-83c9-e36871269f6c",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790173038010,
+      "updated_at": 1790173038010
+    }
+  ],
+  "member_project": [
+    {
+      "member_id": "716703ff-75d9-454e-81fa-d13865a2d1ad",
+      "project_id": "9195743a-26be-499f-b91c-0943c1dbdd82",
+      "is_primary": 1,
+      "created_at": 1790173038001
+    },
+    {
+      "member_id": "06652556-6b69-4ee7-8aca-368826a08e52",
+      "project_id": "a1d6a46f-9f0c-4d86-a3fa-383bfcd28c80",
+      "is_primary": 1,
+      "created_at": 1790173038011
+    }
+  ],
+  "session": [
+    {
+      "id": "b5e10ee3-0329-4449-a21e-e8a465aefaeb",
+      "workspace_id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "member_id": "716703ff-75d9-454e-81fa-d13865a2d1ad",
+      "turn_count": 1,
+      "last_seq": 2,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790173037998,
+      "last_active_at": 1790173041826
+    },
+    {
+      "id": "7c294c60-2ee3-45dd-ab01-d922c243dc7f",
+      "workspace_id": "2e8b4c3d-ae8b-4623-9bff-bd567c6f9905",
+      "member_id": "06652556-6b69-4ee7-8aca-368826a08e52",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790173038010,
+      "last_active_at": null
+    }
+  ],
+  "turn": [
+    {
+      "id": "0578a2c8-efbe-4dc6-872e-efa9110e3a82",
+      "session_id": "b5e10ee3-0329-4449-a21e-e8a465aefaeb",
+      "workspace_id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "trigger_message_id": "e13869f5-5cb8-404a-b4f1-9d21a38b0265",
+      "status": "done",
+      "hop_depth": 0,
+      "cwd": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6a\\src-proj",
+      "pid": 28556,
+      "exit_code": null,
+      "error_text": null,
+      "cost_usd": 0.11858900000000001,
+      "tokens_in": 18963,
+      "tokens_out": 206,
+      "terminal_reason": "complete",
+      "queued_at": 1790173038020,
+      "started_at": 1790173038021,
+      "ended_at": 1790173041826
+    }
+  ],
+  "message": [
+    {
+      "id": "e13869f5-5cb8-404a-b4f1-9d21a38b0265",
+      "workspace_id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "session_id": "b5e10ee3-0329-4449-a21e-e8a465aefaeb",
+      "turn_id": null,
+      "role": "user",
+      "author_member_id": "716703ff-75d9-454e-81fa-d13865a2d1ad",
+      "seq": 1,
+      "content_text": "只做这两件事，不要做别的：\n1. 用 Read 工具读当前目录下的 a.ts。\n2. 用 Edit 工具把 a.ts 里的 `export const x = 1` 改成 `export const x = 2`。\n做完用一句话说明改了什么，不要贴代码。",
+      "content_path": null,
+      "content_bytes": 0,
+      "mentions_json": "[]",
+      "inject_mode": "full",
+      "summary_text": null,
+      "created_at": 1790173038020,
+      "edited_at": null,
+      "deleted_at": null
+    },
+    {
+      "id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "workspace_id": "8640c5ab-ca7f-42f1-817a-b06288bc6c92",
+      "session_id": "b5e10ee3-0329-4449-a21e-e8a465aefaeb",
+      "turn_id": "0578a2c8-efbe-4dc6-872e-efa9110e3a82",
+      "role": "assistant",
+      "author_member_id": "716703ff-75d9-454e-81fa-d13865a2d1ad",
+      "seq": 2,
+      "content_text": "I'll do exactly those two things.把 a.ts 第 1 行 `export const x` 的值从 1 改成了 2，其余内容未动。",
+      "content_path": null,
+      "content_bytes": 116,
+      "mentions_json": "[]",
+      "inject_mode": "full",
+      "summary_text": null,
+      "created_at": 1790173039487,
+      "edited_at": null,
+      "deleted_at": null
+    }
+  ],
+  "message_event": [
+    {
+      "id": 1,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 1,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "I'll",
+      "blob_path": null,
+      "bytes": 4,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173039453
+    },
+    {
+      "id": 2,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 2,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": " do exactly those two things.",
+      "blob_path": null,
+      "bytes": 29,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173039490
+    },
+    {
+      "id": 3,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 3,
+      "kind": "tool_start",
+      "tool_use_id": "call_00_ET_lNe7nUFncVZqfIM0qIZM3021",
+      "tool_name": "Read",
+      "payload_json": "{\"file_path\":\"C:\\\\Users\\\\RedMoon\\\\AppData\\\\Local\\\\Temp\\\\cc-m6a\\\\src-proj\\\\a.ts\"}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173039637
+    },
+    {
+      "id": 4,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 4,
+      "kind": "tool_result",
+      "tool_use_id": "call_00_ET_lNe7nUFncVZqfIM0qIZM3021",
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "1\texport const x = 1\n2\texport const y = 2\n3\t",
+      "blob_path": null,
+      "bytes": 44,
+      "ok": 1,
+      "truncated": 0,
+      "created_at": 1790173039658
+    },
+    {
+      "id": 5,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 5,
+      "kind": "tool_start",
+      "tool_use_id": "call_00_ET_c7yhqwzgSMzGkmh5sDdX9953",
+      "tool_name": "Edit",
+      "payload_json": "{\"replace_all\":false,\"file_path\":\"C:\\\\Users\\\\RedMoon\\\\AppData\\\\Local\\\\Temp\\\\cc-m6a\\\\src-proj\\\\a.ts\",\"old_string\":\"export const x = 1\",\"new_string\":\"export const x = 2\"}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173040517
+    },
+    {
+      "id": 6,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 6,
+      "kind": "tool_result",
+      "tool_use_id": "call_00_ET_c7yhqwzgSMzGkmh5sDdX9953",
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "The file C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6a\\src-proj\\a.ts has been updated successfully. (file state is current in your context — no need to Read it back)",
+      "blob_path": null,
+      "bytes": 164,
+      "ok": 1,
+      "truncated": 0,
+      "created_at": 1790173040537
+    },
+    {
+      "id": 7,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 7,
+      "kind": "file_diff",
+      "tool_use_id": "call_00_ET_c7yhqwzgSMzGkmh5sDdX9953",
+      "tool_name": "Edit",
+      "payload_json": "{\"path\":\"a.ts\"}",
+      "text_blob": "-export const x = 1\n+export const x = 2",
+      "blob_path": null,
+      "bytes": 39,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173040537
+    },
+    {
+      "id": 8,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 8,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "把 a.ts 第 1 行",
+      "blob_path": null,
+      "bytes": 18,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173041146
+    },
+    {
+      "id": 9,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 9,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": " `export const x` 的值",
+      "blob_path": null,
+      "bytes": 24,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173041183
+    },
+    {
+      "id": 10,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 10,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "从 1 改成了 2，其余内容未动。",
+      "blob_path": null,
+      "bytes": 41,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173041223
+    },
+    {
+      "id": 11,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 11,
+      "kind": "usage",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": "{\"in\":18963,\"out\":206,\"cacheRead\":37248,\"cacheCreation\":0,\"thinkingTokens\":0,\"costUsd\":0.11858900000000001}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173041266
+    },
+    {
+      "id": 12,
+      "message_id": "b80a3258-79e0-477e-b581-ce82450ca843",
+      "seq": 12,
+      "kind": "done",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": "{\"reason\":\"complete\"}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790173041266
+    }
+  ]
+}

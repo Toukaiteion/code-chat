@@ -68,8 +68,11 @@ export function turnRepo(db: DatabaseSync) {
        VALUES (?, ?, ?, ?, 'queued', ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, NULL)
        RETURNING *`
     ),
+    /**
+     * `queued` → `running`。**刻意不带 pid** —— 见 `markRunning()` 上的说明。
+     */
     markRunning: db.prepare(
-      `UPDATE turn SET status = 'running', pid = ?, started_at = ? WHERE id = ? RETURNING *`
+      `UPDATE turn SET status = 'running', started_at = ? WHERE id = ? RETURNING *`
     ),
     /** 终态。`ended_at` 一并写入，让「运行时长」不需要二次查询。 */
     finish: db.prepare(
@@ -82,11 +85,20 @@ export function turnRepo(db: DatabaseSync) {
       `UPDATE turn SET status = 'cancelled', ended_at = ? WHERE id = ? RETURNING *`
     ),
     /**
-     * ★ 启动时的孤儿清扫（§4.4）：任何仍是 queued/running 的轮次都是上次硬杀留下的。
+     * ★ 启动时的孤儿清扫（§4.4）：任何仍是 queued/running 的轮次都是上次退出留下的。
      * 跑在 `idx_turn_running` 偏索引上，代价与库大小无关。
+     *
+     * `queued` 与 `running` 都会收，但**原因必须分开写**：`error_text` 是用户看得见的
+     * 那一列（历史回放里就是那条轮次的失败说明）。queued 的写「仍在运行」是**假话** ——
+     * 那一轮从没有过进程。SQLite 的 SET 右侧按**更新前**的行求值，所以 `CASE status`
+     * 读到的正是被改掉之前的那个值。
      */
     reapOrphans: db.prepare(
-      `UPDATE turn SET status = 'failed', ended_at = ?, error_text = '应用上次退出时该轮次仍在运行'
+      `UPDATE turn SET status = 'failed', ended_at = ?,
+         error_text = CASE status
+           WHEN 'running' THEN '应用上次退出时该轮次仍在运行，没有自动恢复'
+           ELSE '应用上次退出时该轮次还没排上队执行，没有自动恢复'
+         END
        WHERE status IN ('queued','running') RETURNING *`
     ),
     listOrphans: db.prepare(
@@ -127,8 +139,21 @@ export function turnRepo(db: DatabaseSync) {
       return mapTurn(row)
     },
 
-    markRunning(id: string, pid: number, now: number): Turn | null {
-      const row = s.markRunning.get(pid, now, id) as Row | undefined
+    /**
+     * ★ **状态变更与 pid 是两件事，这里刻意只做第一件。**
+     *
+     * M2 的版本是 `markRunning(id, pid, now)`，把两者塞进同一条 UPDATE。
+     * 到了 M6a 真的要有调用方时才发现那是个不可能满足的形状：**派发的那一刻
+     * 还没有 pid** —— 进程要等 `run()` 里 spawn 之后才知道，而状态必须在派发时
+     * 就翻成 `running`（否则「每 session 至多一个在跑」这条不变量的依据是空的）。
+     *
+     * 于是 pid 走已有的 `setPid()`，在 spawn 之后补。这正是 §4.5a 规则三
+     * （不许从一个事实推断另一个）在列一级的落点：两件发生在不同时刻的事，
+     * 就该有两次写入。中间那一段 `running` 且 `pid IS NULL` 是**合法**状态，
+     * M10 的孤儿清扫本来就容忍空 pid。
+     */
+    markRunning(id: string, now: number): Turn | null {
+      const row = s.markRunning.get(now, id) as Row | undefined
       return row ? mapTurn(row) : null
     },
 

@@ -16,6 +16,7 @@ import type { PushOf, ReqOf, ResOf } from '../../shared/ipc/contract.ts'
 import { fail, ok, type IpcResult } from '../../shared/ipc/envelope.ts'
 import { INVOKE_SCHEMAS, PUSH_SCHEMAS } from '../../shared/ipc/schemas.ts'
 import type { Store } from '../persist/index.ts'
+import type { Runtime } from '../process/runtime.ts'
 import { toEnvelope } from './errors.ts'
 import type { IpcTransport } from './transport.ts'
 
@@ -66,6 +67,17 @@ export interface HandlerContext {
   newId(): string
   view: ActiveView
   sys: SysCapabilities
+  /**
+   * 运行时门面（调度器 + 合批器 + 适配器 + 子进程登记处）。
+   *
+   * ★ 它是**唯一**能把一轮送进管道的入口 —— `turn:send` 做完库里的那两笔写之后，
+   * 除了调 `runtime.dispatch(turn)` 没有别的路可走。§4.5a 规则一
+   * （「每 session 至多一个 running」）靠的就是这条唯一性：绕过它就意味着绕过调度器。
+   *
+   * ⚠️ 它**不是** `Store` 的一部分：那一层只管持久化，进程内状态（槽位、缓冲、
+   * 活子进程）不属于它，硬塞进去会让「什么东西重启之后还在」这个问题失去答案。
+   */
+  runtime: Runtime
 }
 
 export type Handler<K extends InvokeChannel> = (

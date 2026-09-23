@@ -1,27 +1,33 @@
 import { mkdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { app, shell, BrowserWindow } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import type { Store } from './persist/index.ts'
 import { openStore } from './persist/index.ts'
 import { dbPath } from './infra/paths.ts'
-import { createContext } from './ipc/context.ts'
+import { createActiveView, createContext } from './ipc/context.ts'
 import { createSystemCapabilities } from './ipc/system-capabilities.ts'
 import { createElectronTransport } from './ipc/electron-transport.ts'
 import { createRegistry, type Registry } from './ipc/registry.ts'
 import { registerAll } from './ipc/handlers/index.ts'
+import { createChildRegistry } from './process/child-registry.ts'
+import { createAdapterRegistry } from './adapters/registry.ts'
+import { createRuntime, type Runtime } from './process/runtime.ts'
 import type { PushOf } from '../shared/ipc/contract.ts'
 
 /** 启动期需要告诉用户的事，最终都走 `app:notice` 这一条通道。 */
 type AppNotice = PushOf<'app:notice'>
 
 /**
- * 后端 = 库 + 注册表 + 传输。**在 `whenReady` 里、建窗口之前**装配好，
+ * 后端 = 库 + 运行时 + 注册表 + 传输。**在 `whenReady` 里、建窗口之前**装配好，
  * 这样渲染进程的第一次 `invoke` 一定已经有人接。
  */
 interface Backend {
   store: Store
   registry: Registry
+  /** 退出时要**先于** `store.close()` 冲空（合批器的定时器 + 脏缓冲）。 */
+  runtime: Runtime
 }
 
 let backend: Backend | null = null
@@ -72,16 +78,85 @@ function startBackend(): void {
     mkdirSync(dirname(dbPath()), { recursive: true })
 
     const store = openStore(dbPath())
-    const ctx = createContext(store, createSystemCapabilities())
-    const registry = createRegistry(transport, ctx)
+    const sys = createSystemCapabilities()
 
+    /**
+     * ★ 这里有一个**真的环**：registry 的 `HandlerContext` 要拿到 runtime，
+     * 而 runtime 的推送（`stream:batch` / `workspace:unread`）要走 registry 的 `emit`。
+     *
+     * 用 `let registry = null` + 闭包里 `registry?.emit(...)` 把它接起来，而不是
+     * 造一个「等一下再注入」的 setter —— 后者会让「谁在什么时候才是活的」变成
+     * 一个每个调用点都要小心的隐状态。这里环的**方向**是一眼可见的：
+     * runtime 先建、registry 后建，而 runtime 只在**运行时**（轮次真的产出帧时）
+     * 才读那个变量，那时它必然已经赋值。
+     *
+     * 万一真在赋值前就推了一帧，那帧也**不会丢**：合批器的纪律是
+     * 「先落库、后推送」，丢的只是一次已经进了 `message_event` 的转发。
+     */
+    let registry: Registry | null = null
+
+    const children = createChildRegistry()
+    const adapters = createAdapterRegistry({ registry: children })
+    // ★ 这一个对象交给 runtime（持引用读）**和** ctx（`view:setActive` 写）。
+    //   两个都建自己的话，抑制逻辑就会读一个永远不更新的视图。
+    const view = createActiveView()
+
+    const runtime = createRuntime({
+      store,
+      children,
+      adapters,
+      workspaceRoot: sys.workspacesRoot(),
+      view,
+      emitBatch: (batch) => registry?.emit('stream:batch', batch),
+      emitUnread: (payload) => registry?.emit('workspace:unread', payload),
+      now: () => Date.now(),
+      newId: () => randomUUID(),
+      onWarn: (tag, message, detail) => console.warn(`[runtime:${tag}] ${message}`, detail ?? '')
+    })
+
+    const ctx = createContext({ store, sys, runtime, view })
+    registry = createRegistry(transport, ctx)
     registerAll(registry, ctx)
     // ★ `seal()` 会断言每个通道都被明确分类过（handle 或 defer）。
     //   漏掉一条通道是**开发期**错误，必须在启动时炸，而不是等用户点下去才发现。
     registry.seal()
 
-    backend = { store, registry }
+    backend = { store, registry, runtime }
     console.log(`[main] 数据库已就绪：${dbPath()}（schema v${store.schemaVersion}）`)
+
+    /**
+     * ★ 启动清扫（§4.4，M6a 提前落地状态层的那一半）。
+     *
+     * 「不自动恢复」是产品决策，所以这里**只改状态、不重跑**。但改了就必须说 ——
+     * 用户上次开着的应用里那几条「排队中 / 运行中」，这一秒变成了「失败」，
+     * 不给一句话就是让界面自己编一个解释。两类分开报，因为它们真的是两件事：
+     * 一类是跑到一半被掐了，另一类是**从来没发出去过**。
+     */
+    try {
+      const sweep = runtime.startupSweep()
+      if (sweep.reapedRunning > 0) {
+        notify({
+          level: 'warning',
+          message: `上次退出时有 ${sweep.reapedRunning} 个轮次正在运行，已标记为失败（不会自动恢复）`,
+          detail: { reapedRunning: sweep.reapedRunning }
+        })
+      }
+      if (sweep.reapedQueued > 0) {
+        notify({
+          level: 'warning',
+          message: `有 ${sweep.reapedQueued} 个轮次上次排队后还没开始执行，已标记为失败（不会自动恢复）`,
+          detail: { reapedQueued: sweep.reapedQueued }
+        })
+      }
+    } catch (err) {
+      // 清扫失败不影响这一次能不能用，但它会让界面上留下几条**永远不会动**的
+      // 「排队中」—— 所以必须说出来，而且不能说成「数据库起不来」。
+      console.error('[main] 启动清扫失败：', err)
+      notify({
+        level: 'warning',
+        message: `上一次遗留的轮次没能清理干净：${err instanceof Error ? err.message : String(err)}`
+      })
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[main] 后端启动失败：', err)
@@ -185,6 +260,10 @@ if (!app.requestSingleInstanceLock()) {
   // 而 WAL 文件要有一次干净的 close 才能被 checkpoint 回主库。
   app.on('will-quit', () => {
     transport.dispose?.()
+    // ★ 顺序是硬的：合批器的 `close()` 是**同步冲空**（清定时器 + 把脏缓冲在一个事务里写完），
+    //   而它要写的正是这个库。反过来的话，那些帧会在一个已经关掉的连接上写 ——
+    //   表现是退出时日志里一串「落库失败」，而用户那最后一句话永远停在半截。
+    backend?.runtime.close()
     backend?.store.close()
     backend = null
   })

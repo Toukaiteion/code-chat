@@ -68,14 +68,11 @@ test('每个通道调用后都有明确归属：成功、E_INVALID_PAYLOAD、或
 test('★ 未实现的通道在合法载荷下返回 E_NOT_IMPLEMENTED，并带上里程碑号', async () => {
   const h = harness()
   const w = await makeWorkspace(h)
-  const { memberId, sessionId } = await makeMember(h, w, await makeActor(h))
 
   // 这些载荷**全都能过 zod**（否则测的就不是「未实现」而是「校验」了）。
   const valid: Record<string, unknown> = {
-    'turn:send': { workspaceId: w, memberId, text: '你好' },
     'turn:interject': { turnId: 't1', text: '插一句' },
-    'turn:stopAll': { workspaceId: w },
-    'stream:resume': { sessionId, fromSeq: 0 }
+    'turn:stopAll': { workspaceId: w }
   }
 
   const reported: Record<string, string> = {}
@@ -88,15 +85,17 @@ test('★ 未实现的通道在合法载荷下返回 E_NOT_IMPLEMENTED，并带�
   /**
    * ★ 「不填桩」那个决定的清单化表达：这些通道永远不返回伪造的成功数据。
    *
-   * M4 把 `project:copy` / `project:clone` 从这个清单里**移走了** —— 它们真的实现了，
-   * 不再是 defer。真正实现的那两条由 `test/ipc/import.test.ts` 覆盖（真文件系统、
-   * 真 git），不在这里用「未实现」的方式验。
+   * 这张清单**每个里程碑都会变短**，而它变短的地方正是「defer 名单过时了」这条
+   * 错误唯一会在编译期之外被抓住的地方 —— 所以移走一条通道时**必须同时改这里**：
+   *
+   * - M4 移走了 `project:copy` / `project:clone`（真实现了，由 `test/ipc/import.test.ts`
+   *   用真文件系统 + 真 git 覆盖）；
+   * - M6a 移走了 `turn:send` 与 `stream:resume`（真实现了，由 `test/ipc/turn.test.ts`
+   *   覆盖 —— 它们现在会**返回成功**，用「未实现」的方式验不出任何东西）。
    */
   assert.deepEqual(reported, {
-    'turn:send': 'M5/M6',
     'turn:interject': 'M9',
-    'turn:stopAll': 'M9',
-    'stream:resume': 'M6'
+    'turn:stopAll': 'M9'
   })
 })
 
@@ -125,14 +124,12 @@ test('未实现的通道也照样校验载荷 —— 规则统一，没有例外
   const h = harness()
 
   // 空载荷 → 先撞校验
-  assert.equal(expectFail(await h.call('turn:send', undefined)).code, 'E_INVALID_PAYLOAD')
+  assert.equal(expectFail(await h.call('turn:interject', undefined)).code, 'E_INVALID_PAYLOAD')
 
   // 合法载荷 → 才轮到「没实现」
-  const error = expectFail(
-    await h.call('turn:send', { workspaceId: 'w', memberId: 'm', text: 'hi' })
-  )
+  const error = expectFail(await h.call('turn:interject', { turnId: 't1', text: '插一句' }))
   assert.equal(error.code, 'E_NOT_IMPLEMENTED')
-  assert.equal((error.detail as { milestone: string }).milestone, 'M5/M6', '必须带上里程碑号')
+  assert.equal((error.detail as { milestone: string }).milestone, 'M9', '必须带上里程碑号')
 })
 
 test('limit 超过上限被拒 —— 渲染层一次要不走一百万行', async () => {
@@ -438,7 +435,8 @@ test('turn:stop 对运行中的轮次诚实地说「还没实现」，而不是�
   const w = await makeWorkspace(h)
   const { sessionId } = await makeMember(h, w, await makeActor(h))
   h.store.repos.turn.create({ id: 't1', sessionId, workspaceId: w, cwd: 'G:/a', now: 1 })
-  h.store.repos.turn.markRunning('t1', 4242, 2)
+  h.store.repos.turn.markRunning('t1', 2)
+  h.store.repos.turn.setPid('t1', 4242)
 
   const error = expectFail(await h.call('turn:stop', { turnId: 't1' }))
   assert.equal(error.code, 'E_NOT_IMPLEMENTED')
@@ -453,7 +451,7 @@ test('turn:stop 对已结束的轮次返回 E_CONFLICT（不能把 done 改写�
   const w = await makeWorkspace(h)
   const { sessionId } = await makeMember(h, w, await makeActor(h))
   h.store.repos.turn.create({ id: 't1', sessionId, workspaceId: w, cwd: 'G:/a', now: 1 })
-  h.store.repos.turn.markRunning('t1', 1, 2)
+  h.store.repos.turn.markRunning('t1', 2)
   h.store.repos.turn.finish('t1', 'done', {}, 3)
 
   assert.equal(expectFail(await h.call('turn:stop', { turnId: 't1' })).code, 'E_CONFLICT')

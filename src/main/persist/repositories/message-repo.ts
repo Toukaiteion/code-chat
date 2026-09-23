@@ -128,6 +128,17 @@ export function messageRepo(db: DatabaseSync) {
     editText: db.prepare(
       `UPDATE message SET content_text = ?, content_bytes = ?, edited_at = ? WHERE id = ? RETURNING *`
     ),
+    /**
+     * ★ 流式折叠正文（M6a）。
+     *
+     * **与 `editText` 的唯一区别就是不动 `edited_at`** —— 这不是风格问题：
+     * 那个列的含义是「**用户**改过这条消息」，而流式写入是系统在写。
+     * 复用 `editText` 会让界面把模型自己的回答标成「已编辑」，
+     * 而那个标记是用户用来判断「这条还是不是它原来说的」的依据。
+     */
+    setStreamedText: db.prepare(
+      `UPDATE message SET content_text = ?, content_bytes = ? WHERE id = ? RETURNING *`
+    ),
     setInjectMode: db.prepare(
       `UPDATE message SET inject_mode = ?, summary_text = ? WHERE id = ? RETURNING *`
     ),
@@ -247,6 +258,14 @@ export function messageRepo(db: DatabaseSync) {
       return row ? mapMessage(row) : null
     },
 
+    /** 流式折叠：只改正文与字节数，**不碰 `edited_at`**（见 statement 上的说明）。 */
+    setStreamedText(id: string, text: string): Message | null {
+      const row = s.setStreamedText.get(text, Buffer.byteLength(text, 'utf8'), id) as
+        | Row
+        | undefined
+      return row ? mapMessage(row) : null
+    },
+
     setInjectMode(id: string, mode: InjectMode, summary: string | null): Message | null {
       const row = s.setInjectMode.get(mode, summary, id) as Row | undefined
       return row ? mapMessage(row) : null
@@ -306,7 +325,9 @@ export function messageRepo(db: DatabaseSync) {
      * `kind='thinking'` 保留 7 天；`tool_result` 的大输出保留 3 天。
      *
      * ⚠️ 删除 `blob_path` 非空的行之前，调用方要先清 blob 文件，
-     * 否则 `userData/blobs/` 会留下无主文件。M10 的孤儿扫描负责这件事。
+     * 否则磁盘上会留下无主文件。**M6a 起 `blob_path` 一律为 NULL**（全量正文留在
+     * 同一行的 `text_blob` 里，见 §8.9-9 的收口），所以这条清理由 M10
+     * 连同 blob-store、retention、孤儿扫描一起做 —— 那时位置是 `<空间>/blobs/`。
      */
     purgeEventsBefore(kind: EventKind, cutoff: number): number {
       // `StatementSync.run()` 的返回类型把 `changes` 标成 `number | bigint`，

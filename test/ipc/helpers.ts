@@ -10,16 +10,32 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { openStore } from '../../src/main/persist/index.ts'
 import type { Store } from '../../src/main/persist/index.ts'
 import { locateGit } from '../../src/main/infra/git.ts'
-import { createRegistry, type HandlerContext, type Registry } from '../../src/main/ipc/registry.ts'
+import { createActiveView } from '../../src/main/ipc/context.ts'
+import {
+  createRegistry,
+  type ActiveView,
+  type HandlerContext,
+  type Registry,
+  type SysCapabilities
+} from '../../src/main/ipc/registry.ts'
 import { registerAll } from '../../src/main/ipc/handlers/index.ts'
 import type { IpcTransport } from '../../src/main/ipc/transport.ts'
+import { createChildRegistry, type ChildRegistry, type KillTimings } from '../../src/main/process/child-registry.ts'
+import { createAdapterRegistry, type AdapterRegistry } from '../../src/main/adapters/registry.ts'
+import type { CliLaunch } from '../../src/main/adapters/claude/claude-adapter.ts'
+import { createRuntime, type Runtime } from '../../src/main/process/runtime.ts'
+import type { StreamBatch, UnreadPayload } from '../../src/main/process/event-batcher.ts'
 import type { IpcResult } from '../../src/shared/ipc/envelope.ts'
 
 export const NOW = 1_700_000_000_000
+
+/** 假 CLI 的绝对路径。真 spawn 它，只把那个原生二进制换掉。 */
+const FAKE_CLI = fileURLToPath(new URL('../fixtures/fake-claude.cjs', import.meta.url))
 
 // ─────────────────────────────────────────────────────────────
 // 临时目录
@@ -228,28 +244,114 @@ export interface HarnessOptions {
    * - `null` → 明确模拟「本机没装 git」，验那条分支的人话错误。
    */
   gitPath?: string | null
+  /**
+   * 覆盖 CLI 的启动方式。
+   *
+   * ★ **默认不是「去问本机」** —— 默认是
+   * `{ exe: process.execPath, preambleArgs: [假 CLI 脚本] }`，也就是真 spawn、
+   * 真 stdio、真解析，只把那个 237MB 的原生二进制换成一个 Node 脚本。
+   *
+   * 为什么默认值这么定：`resolveClaude()` 会去 PATH / 已知安装位置找一个**真的**
+   * `claude.exe`，而一台真装了它的机器上，「没有 launch」这条用例会真的起一个真 claude、
+   * 带真凭据打真端点**真花钱** —— 表现成「一个跑了三分钟的测试」。
+   * 这不是假想的风险，`claude-adapter.ts` 的文件头记着同一个坑。
+   * 想验那条分支的用例必须**显式**传 `resolve: async () => null`。
+   */
+  cliLaunch?: CliLaunch
+  /** 中断阶梯的宽限期。测试注入缩短值，否则每个用例真等 8 秒以上。 */
+  timings?: KillTimings
+  /** 合批器的刷新间隔。省略用生产的 33ms。 */
+  flushMs?: number
 }
+
+/** 运行时的 id 计数器**与 ctx 的分开**，否则「id-7」到底是消息还是轮次分不清。 */
+let rtIds = 0
+/** `harness()` 的 id 计数器。 */
+let ids = 0
+
+/** 宿主能力的固定实现。生产递的是 `system-capabilities.ts`。 */
+function testSys(opts: HarnessOptions, root: string): SysCapabilities {
+  return {
+    pickPath: async () => opts.pickPath ?? null,
+    revealPath: async () => true,
+    workspacesRoot: () => root,
+    locateGit: async () => (opts.gitPath === undefined ? locateGit() : opts.gitPath)
+  }
+}
+
+/** 默认的假 CLI：`process.execPath` 跑那个 Node 脚本。 */
+export function fakeCliLaunch(): CliLaunch {
+  return { exe: process.execPath, preambleArgs: [FAKE_CLI] }
+}
+
+export type PushSink = (channel: 'stream:batch' | 'workspace:unread', payload: unknown) => void
+
+interface RuntimeKit {
+  runtime: Runtime
+  view: ActiveView
+  children: ChildRegistry
+  adapters: AdapterRegistry
+}
+
+/**
+ * 造一套**真的**运行时（真调度器 + 真合批器 + 真适配器 + 真子进程登记处）。
+ *
+ * ★ 这里刻意**不打桩**。M6a 的产出本身就是「库里的行、帧的顺序、抑制与重放」，
+ * 打桩会把被验的那件东西替掉 —— 于是用例全绿而管道其实没接上。
+ * 唯一被替换的是那个 237MB 的二进制（`cliLaunch`），以及时间与宽限期。
+ */
+function buildRuntime(
+  store: Store,
+  root: string,
+  view: ActiveView,
+  sink: PushSink,
+  opts: HarnessOptions
+): RuntimeKit {
+  const children = createChildRegistry()
+  const adapters = createAdapterRegistry({
+    registry: children,
+    launch: opts.cliLaunch ?? fakeCliLaunch(),
+    ...(opts.timings !== undefined ? { timings: opts.timings } : {})
+  })
+  const runtime = createRuntime({
+    store,
+    children,
+    adapters,
+    workspaceRoot: root,
+    view,
+    emitBatch: (batch) => sink('stream:batch', batch),
+    emitUnread: (payload) => sink('workspace:unread', payload),
+    now: () => NOW,
+    newId: () => `rt-${++rtIds}`,
+    onWarn: () => {},
+    ...(opts.flushMs !== undefined ? { flushMs: opts.flushMs } : {})
+  })
+  return { runtime, view, children, adapters }
+}
+
+/**
+ * ★ `testContext` 用的那套 runtime 的推送**没有出口** —— 它只是为了让
+ * `HandlerContext.runtime` 这个必填字段有个真东西。那些不跑轮次的用例
+ * （`registry.test.ts` 的形状校验）用的是它。
+ *
+ * 需要断言「批次真的推到了渲染层」的用例走 `harness()`：那个把出口接到了
+ * `transport.sent` 上。两边共用 `buildRuntime`，所以差别**只有出口**这一件事。
+ */
+const devNull: PushSink = () => {}
 
 /** `now` / `newId` 都**确定**：断言里因此能写具体值，而不是「非空」。 */
 export function testContext(store: Store, opts: HarnessOptions = {}): HandlerContext {
   let n = 0
   const root = opts.root ?? tmpRoot()
+  const view = createActiveView()
+  const { runtime } = buildRuntime(store, root, view, devNull, opts)
   return {
     store,
     now: () => NOW,
     newId: () => `id-${++n}`,
-    view: { workspaceId: null, sessionId: null },
-    /**
-     * 宿主能力在测试里是一组**固定实现**：空间根指向临时目录、
-     * 对话框返回预设值、git 定位器可控。这就是 `SysCapabilities` 走注入的全部回报
-     * —— 建空间与「没装 git」两条分支因此都能自动跑，不用起 Electron、不用点对话框。
-     */
-    sys: {
-      pickPath: async () => opts.pickPath ?? null,
-      revealPath: async () => true,
-      workspacesRoot: () => root,
-      locateGit: async () => (opts.gitPath === undefined ? locateGit() : opts.gitPath)
-    }
+    view,
+    sys: testSys(opts, root),
+    runtime
   }
 }
 
@@ -258,18 +360,44 @@ export interface Harness {
   registry: Registry
   transport: FakeTransport
   ctx: HandlerContext
+  runtime: Runtime
+  /** 合批器持有的**同一个**视图对象 —— 想模拟「用户切了空间」就改它。 */
+  view: ActiveView
   call: FakeTransport['call']
 }
 
-/** 内存库 + 全量 handler + 假 transport，已经 `seal()` 过。 */
+/** 内存库 + 全量 handler + 真运行时 + 假 transport，已经 `seal()` 过。 */
 export function harness(opts: HarnessOptions = {}): Harness {
   const store = openStore(':memory:')
   const transport = fakeTransport()
-  const ctx = testContext(store, opts)
-  const registry = createRegistry(transport, ctx)
+  const root = opts.root ?? tmpRoot()
+  const view = createActiveView()
+
+  /**
+   * 与 `main/index.ts` 同一个环：runtime 的推送要走 registry 的 `emit`
+   * （于是出站也过 zod 校验、也落在 `transport.sent` 上），而 registry 的
+   * ctx 要拿到 runtime。用闭包接起来，顺序是 runtime 先、registry 后。
+   */
+  let registry: Registry | null = null
+  const { runtime } = buildRuntime(store, root, view, (channel, payload) => {
+    // 类型收窄：sink 的两个通道都是联合里的字面量，这里按 channel 分派。
+    if (channel === 'stream:batch') registry?.emit('stream:batch', payload as StreamBatch)
+    else registry?.emit('workspace:unread', payload as UnreadPayload)
+  }, opts)
+
+  const ctx: HandlerContext = {
+    store,
+    now: () => NOW,
+    newId: () => `id-${++ids}`,
+    view,
+    sys: testSys(opts, root),
+    runtime
+  }
+  registry = createRegistry(transport, ctx)
   registerAll(registry, ctx)
   registry.seal()
-  return { store, registry, transport, ctx, call: transport.call }
+
+  return { store, registry, transport, ctx, runtime, view, call: transport.call }
 }
 
 /** 断言信封是失败的，且返回错误对象（收窄类型用）。 */

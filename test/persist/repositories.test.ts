@@ -349,7 +349,16 @@ test('★ 孤儿清扫：启动时把遗留的 queued/running 翻成 failed', ()
     cwd: 'G:/work/mine',
     now: NOW
   })
-  s.repos.turn.markRunning(running.id, 12345, NOW)
+  // ★ 状态与 pid 是**两次**写入（见 `markRunning()` 的说明）：派发时还不知道 pid，
+  // 它要等 spawn 之后才补。这里把这两步都走一遍，顺带证明中间那段
+  // `running` 且 `pid IS NULL` 是合法的。
+  s.repos.turn.markRunning(running.id, NOW)
+  assert.equal(
+    s.repos.turn.get(running.id)?.pid,
+    null,
+    'markRunning 之后、setPid 之前，pid 就是空的 —— 这是合法状态，不是漏写'
+  )
+  s.repos.turn.setPid(running.id, 12345)
   // 只为在库里留下一个 queued 轮次（值本身用不到），供后面的孤儿清扫断言
   s.repos.turn.create({
     id: 'turn-queued',
@@ -402,7 +411,7 @@ test('turn 的终态字段完整落库（成本 / token / 终止原因）', () =
   const s = openStore(':memory:')
   const { workspaceId, sessionId } = seed(s)
   const t = s.repos.turn.create({ id: 't1', sessionId, workspaceId, cwd: 'G:/work/mine', now: NOW })
-  s.repos.turn.markRunning(t.id, 999, NOW + 1)
+  s.repos.turn.markRunning(t.id, NOW + 1)
 
   const finished = s.repos.turn.finish(
     t.id,

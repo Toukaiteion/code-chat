@@ -36,6 +36,9 @@
  * | `--fake-echo-argv=<文件>` | 把收到的生产参数原样写进文件（测 `buildClaudeArgs` 的契约） |
  * | `--fake-echo-prompt=<文件>` | 把 `--append-system-prompt-file` 的内容抄出来（测临时文件的生死） |
  * | `--fake-ignore-sigterm` | 装一个 SIGTERM 处理器（只在 POSIX 上有意义，见下） |
+ * | `--fake-delay=<毫秒>` | 每行之间隔这么久（测**合批**：吐太快就全挤进同一次刷新） |
+ * | `--fake-delta-count=<n>` | 把正文那一段切成 n 个增量（测相邻 text 帧的**拼接**） |
+ * | `--fake-big-result=<字节>` | 工具结果撑到这么大（测 256KB 帧上限与 `truncated`） |
  *
  * ## `--fake-on-interrupt` 的三种反应 —— 这是本文件最要紧的一栏
  *
@@ -70,6 +73,13 @@ const split = hasFlag('split')
 
 /** 一个装了 SIGTERM 处理器、因此**拒绝**被 SIGTERM 杀掉的后代（只在 POSIX 上有意义）。 */
 const IGNORE_SIGTERM = hasFlag('ignore-sigterm')
+
+/** 行间隔。默认 0 = 能吐多快吐多快。 */
+const DELAY_MS = Number(flag('delay') ?? 0)
+/** 正文增量切几段。默认 1（就是剧本里原来那一整句）。 */
+const DELTA_COUNT = Number(flag('delta-count') ?? 1)
+/** 工具结果撑到多少字节。默认 0 = 用剧本里那句人话。 */
+const BIG_RESULT_BYTES = Number(flag('big-result') ?? 0)
 
 // ─────────────────────────────────────────────────────────────
 // 剧本
@@ -107,6 +117,31 @@ const RESULT_OK = {
   total_cost_usd: 0.0123
 }
 
+/** 正文那一整句。`--fake-delta-count` 只是把它**切开**，不改内容。 */
+const TEXT = '我来修这个空指针。'
+
+/**
+ * 把 `TEXT` 切成 n 段。**切出来的段拼回去必须逐字等于 `TEXT`** ——
+ * 否则下面的完整 assistant 块与增量就会对不上，而那正是解析器要去重的东西，
+ * 于是用例会验到一个假的失败（或更糟：一个假通过）。
+ */
+function textDeltas(n) {
+  const count = Math.max(1, Math.floor(n))
+  const size = Math.ceil(TEXT.length / count)
+  const out = []
+  for (let k = 0; k < count && k * size < TEXT.length; k += 1) {
+    out.push(TEXT.slice(k * size, (k + 1) * size))
+  }
+  return out
+}
+
+/** 工具结果的内容。`--fake-big-result` 时撑到指定字节数（测 256KB 帧上限）。 */
+function toolOutput() {
+  if (!BIG_RESULT_BYTES) return '已修改 a.ts'
+  // 用 ASCII 填，字节数 = 字符数，断言里那个数就是这里的数。
+  return 'x'.repeat(BIG_RESULT_BYTES)
+}
+
 /** 内容块：text + tool_use。增量与完整块**都发**，用来验去重（§2.3-2）。 */
 function normalLines() {
   return [
@@ -119,9 +154,12 @@ function normalLines() {
     { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig-abc' } } },
     { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
 
-    // ── 一段正文 ──
+    // ── 一段正文。默认一整句；`--fake-delta-count=N` 时切 N 段 ──
     { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text' } } },
-    { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '我来修这个空指针。' } } },
+    ...textDeltas(DELTA_COUNT).map((text) => ({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text } }
+    })),
     { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
 
     // ── 一个工具调用 ──
@@ -138,7 +176,7 @@ function normalLines() {
         id: 'msg-1',
         content: [
           { type: 'thinking', thinking: '先看看这个函数' },
-          { type: 'text', text: '我来修这个空指针。' },
+          { type: 'text', text: TEXT },
           { type: 'tool_use', id: 'toolu_01', name: 'Edit', input: { file_path: 'a.ts', old_string: 'x.y', new_string: 'x?.y' } }
         ]
       }
@@ -147,7 +185,7 @@ function normalLines() {
     // 工具结果：`tool_use_result` 是**顶层**的（§2.2）。
     {
       type: 'user',
-      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_01', content: '已修改 a.ts', is_error: false }] },
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_01', content: toolOutput(), is_error: false }] },
       tool_use_result: { file: { filePath: 'a.ts', numLines: 12 } }
     },
 
@@ -231,6 +269,38 @@ function exitNonzeroLines() {
   ]
 }
 
+/**
+ * ★ `<synthetic>` —— **归档原文，一个字都没改。**
+ *
+ * 来源：`scripts/evidence/m5-2026-09-23T13-05-15-211Z/compact.ndjson` 的第 2–6 行
+ * （那一次压上下文失败的会话，M5 探针跑出来的真东西）。**证据 → 回归用例，不再花钱。**
+ *
+ * ## 为什么必须逐字照抄，而不能"提一个同形状的"
+ *
+ * 这个剧本要证的是一个**已经发生过的真缺陷**：解析器原先的兜底分支
+ * （*整轮没见过增量时由完整块补发文本*）把 CLI **自己的报错**当成了模型说的话，
+ * 于是那一轮的正文变成了 `"Prompt is too long"`。M6a 一旦落库，用户看到的就是
+ * 模型"开口"说了句 CLI 的报错（§8.9-18 / §4.4d）。
+ *
+ * 手搓一个"差不多"的行会丢掉两件恰好是判据的东西：
+ *
+ * 1. `model` 是字面量 `"<synthetic>"` —— 判据的来源是**这个字段**，不是文本内容。
+ * 2. 终态行的 `subtype` 是 **`"success"`**，而 `is_error` 是 **`true`**。
+ *    ★ 这两者**互相矛盾**，而真 CLI 就是这么报的 —— 所以「按 subtype 判成败」
+ *    这条看着很自然的写法是**错的**，`is_error` 才作数。任何手搓的行都不会
+ *    不小心带上这个矛盾，于是也就验不到这条。
+ */
+function syntheticLines() {
+  return [
+    INIT,
+    { type: 'system', subtype: 'status', status: 'requesting', session_id: '93adecc1-2bc4-4ff7-b82b-3df1dd371bbb', uuid: 'a7c30605-95ba-4a44-9cc9-11384d5aa44e' },
+    { type: 'system', subtype: 'status', status: 'compacting', session_id: '93adecc1-2bc4-4ff7-b82b-3df1dd371bbb', uuid: '89e877ff-4b51-4915-8423-53f0381453f4' },
+    { type: 'system', subtype: 'status', status: null, compact_result: 'failed', compact_error: 'too_few_groups', session_id: '93adecc1-2bc4-4ff7-b82b-3df1dd371bbb', uuid: '6bf5dc6a-36ff-4f87-9dba-833604df7bf4' },
+    { type: 'assistant', message: { diagnostics: null, id: 'aba77165-7bcf-4fa7-b9df-3b79a7cdf168', container: null, model: '<synthetic>', role: 'assistant', stop_details: null, stop_reason: 'stop_sequence', stop_sequence: '', type: 'message', usage: { output_tokens_details: null, input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 }, service_tier: null, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 }, inference_geo: null, iterations: null, speed: null }, content: [{ type: 'text', text: 'Prompt is too long' }], context_management: null }, parent_tool_use_id: null, session_id: '93adecc1-2bc4-4ff7-b82b-3df1dd371bbb', uuid: '66cde6f5-4204-43b0-b6d6-98fe1954085e', timestamp: '2026-09-23T13:05:16.215Z', error: 'invalid_request', is_api_error_message: true },
+    { duration_api_ms: 0, stop_reason: 'stop_sequence', session_id: '93adecc1-2bc4-4ff7-b82b-3df1dd371bbb', total_cost_usd: 0, usage: { output_tokens_details: { thinking_tokens: 0 }, input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 }, service_tier: 'standard', cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 }, inference_geo: '', iterations: [], speed: 'standard' }, modelUsage: {}, permission_denials: [], terminal_reason: 'blocking_limit', fast_mode_state: 'off', fast_mode_disabled_reason: 'sdk_opt_in_required', subagent_stats: { spawned: 0, requested: { background: 0, foreground: 0, unset: 0 }, started_in_background: 0, max_depth: 0, spawned_by_subagents: 0, completed: 0, failed: 0, killed: { parent: 0, user: 0, system: 0 }, refused: { depth_limit: 0, concurrency_limit: 0, budget: 0 }, by_type: {} }, is_error: true, num_turns: 1, subtype: 'success', api_error_status: null, result: 'Prompt is too long', type: 'result', duration_ms: 119, uuid: '2d24eef2-ae16-4eaa-8855-194a859a8013', queued_turn_count: 0, result_index: 0 }
+  ]
+}
+
 const SCENARIOS = {
   normal: normalLines,
   'no-partial': noPartialLines,
@@ -239,6 +309,8 @@ const SCENARIOS = {
   'budget-like': budgetLikeLines,
   'no-result': noResultLines,
   'exit-nonzero': exitNonzeroLines,
+  /** 归档原文（压上下文失败），见 `syntheticLines`。 */
+  synthetic: syntheticLines,
   /** 一行都不吐，正常退出 —— 验「它正常地结束了，但我们没读到结局」这个诚实的说法。 */
   empty: () => []
 }
@@ -325,6 +397,11 @@ const lines = (SCENARIOS[scenario] ?? SCENARIOS.normal)()
 
 // ── 吐剧本。`--fake-split` 时第三行分两半写，中间隔一下，
 //    这样它必然跨两个 `data` 事件 —— 验解析器的行缓冲真的在缓冲。
+//
+//    `--fake-delay=<毫秒>` 时每行之间都隔一下。**这不是为了真实感，是为了让合批
+//    真的发生**：不加间隔时整个剧本会在几毫秒内全部到达，于是主进程那边
+//    一次刷新就把几十帧全冲出去了，「33ms 定时器攒批」这条路径根本没被走到 ——
+//    用例会绿，而它以为自己在验的那件事一次都没发生。
 let i = 0
 function pump() {
   while (i < lines.length) {
@@ -341,6 +418,10 @@ function pump() {
     }
     emit(lines[i])
     i += 1
+    if (DELAY_MS > 0) {
+      setTimeout(pump, DELAY_MS)
+      return
+    }
   }
   afterScript()
 }

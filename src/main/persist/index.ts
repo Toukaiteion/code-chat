@@ -7,6 +7,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { openDatabase, withTransaction } from './db.ts'
 import { runMigrations, currentVersion } from './migrations/index.ts'
+import { assertDdlEnumsMatch } from './ddl-enums.ts'
 import { workspaceRepo } from './repositories/workspace-repo.ts'
 import { projectRepo } from './repositories/project-repo.ts'
 import { actorRepo } from './repositories/actor-repo.ts'
@@ -36,15 +37,18 @@ export interface Store {
 }
 
 /**
- * 打开数据库、跑迁移、装配 repository。
+ * 打开数据库、跑迁移、**断言枚举一致**、装配 repository。
  *
- * 顺序是**强制的**：repository 的工厂函数在构造时就会 `db.prepare(...)`，
- * 表不存在会直接抛错。先迁移再装配，问题会在启动时立刻暴露，
- * 而不是等到第一次查询。
+ * 顺序是**强制的**：
+ * 1. 迁移在前 —— repository 的工厂函数在构造时就会 `db.prepare(...)`，表不存在直接抛错；
+ * 2. 断言在迁移之后、装配之前 —— 它读的是 `sqlite_master`，也就是**这次真的要用的那份
+ *    DDL**，包括用户从旧版本升上来的库（§8.5a）。放在这里而不是 `main/index.ts` 里，
+ *    是因为测试用的也是这个入口，于是同一条断言在 `npm test` 里每次都跑。
  */
 export function openStore(path: string): Store {
   const db = openDatabase(path)
   runMigrations(db)
+  assertDdlEnumsMatch(db)
 
   const repos: Repositories = {
     workspace: workspaceRepo(db),
@@ -66,6 +70,7 @@ export function openStore(path: string): Store {
 }
 
 export { openDatabase, withTransaction } from './db.ts'
+export { assertDdlEnumsMatch, ddlCheckedValues } from './ddl-enums.ts'
 export { runMigrations, currentVersion, MIGRATIONS } from './migrations/index.ts'
 export type { Migration, MigrationResult } from './migrations/types.ts'
 export {

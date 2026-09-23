@@ -16,12 +16,14 @@
  */
 import { z } from 'zod'
 import {
+  AGENT_ERROR_CODES,
   AGENT_KINDS,
   EFFORT_LEVELS,
   EVENT_KINDS,
   INJECT_MODES,
   MEMBER_ROLES,
   PROJECT_ORIGINS,
+  TERMINAL_REASONS,
   TURN_STATUSES
 } from '../entities.ts'
 import type {
@@ -217,24 +219,44 @@ export const StreamFrameSchema = z.discriminatedUnion('k', [
     truncated: z.boolean().optional()
   }),
   z.object({ seq: z.number(), k: z.literal('file_diff'), path: z.string(), patch: z.string() }),
+  /**
+   * ★ **三个缓存/思考字段是必需的，不是可选的**（§4.3 补记 ③，M6a 落地）。
+   *
+   * 它们在 `AgentEvent.usage` 上确实是可选的（CLI 可以不上报），但**帧上不是** ——
+   * 合批器负责把「上报值 > 0 就用上报值，否则用流内累计」这件事**做完再发**
+   * （§4.6a 规则二）。留成可选就等于把「这个数到底有没有」推给渲染层，
+   * 而渲染层拿到的语义会是「0」与「没上报」不可区分 —— 那正是 M7
+   * 「缓存命中必须非零」那条验收**做不成**的原因。
+   *
+   * `costUsd` 保持可选：它真的可能未知，且 §2.4-2 说这个端点上的值本来就不可信。
+   */
   z.object({
     seq: z.number(),
     k: z.literal('usage'),
     in: z.number(),
     out: z.number(),
+    /** 缓存读命中量（`cache_read_input_tokens`）。0 表示确实没命中，不是「没上报」。 */
+    cacheRead: z.number(),
+    cacheCreation: z.number(),
+    thinkingTokens: z.number(),
     costUsd: z.number().optional()
   }),
   z.object({
     seq: z.number(),
     k: z.literal('error'),
-    code: z.string(),
+    /**
+     * ★ **闭合联合**（§4.3 补记 ①）。这里是 `AGENT_ERROR_CODES` 本身，不是它的副本 ——
+     * 「主进程调子进程失败」与「IPC 调用失败」是两件事，UI 要对每一类给准确的下一步提示，
+     * 而不是把「进程没起来」和「这轮超预算」渲染成同一句「出错了」。
+     */
+    code: z.enum(AGENT_ERROR_CODES),
     message: z.string(),
     fatal: z.boolean()
   }),
   z.object({
     seq: z.number(),
     k: z.literal('done'),
-    reason: z.enum(['complete', 'interrupted', 'crashed', 'budget'])
+    reason: z.enum(TERMINAL_REASONS)
   })
 ])
 
@@ -245,6 +267,15 @@ export const StreamBatchSchema = z.object({
   sessionId: z.string(),
   turnId: z.string(),
   actorId: z.string(),
+  /**
+   * ★ **主进程启动时生成的纪元**（§4.3）。
+   *
+   * 帧 `seq` 是**每 session、在主进程内存里**单调的，进程一重启就从 0 重来。
+   * 渲染层手里那个「已载入到 seq=812」于是会变成**恰好把新帧全部滤掉的数字**：
+   * 重放拿到空、实时帧被 `seq > fromSeq` 判为旧帧丢弃，界面**静默地**永远不动。
+   * 带上 epoch，渲染层就能发现「水位线不是这一纪元的」并整段重跑 `message:list`。
+   */
+  epoch: z.string(),
   fromSeq: z.number(),
   toSeq: z.number(),
   frames: z.array(StreamFrameSchema)
@@ -582,9 +613,25 @@ export const INVOKE_SCHEMAS = {
     req: z.object({ workspaceId: z.string().nullable(), sessionId: z.string().nullable() }),
     res: NoPayload
   },
+  /**
+   * ★ **重放是「同纪元才能续」的**（§4.3）。
+   *
+   * `epoch` 必须是渲染层**当前持有**的那个（随 `stream:batch` 发下去的），
+   * 不是主进程手里的那个 —— 请求方要说的是「我这条水位线属于哪一纪元」。
+   *
+   * `matched: false` + 空帧**不是错误**：它是「你那条水位线作废了」这个事实本身。
+   * 渲染层据此丢弃水位线、整段重跑 `message:list`。做成错误码的话，
+   * 渲染层会走进「重试」分支，而重试永远重试不出正确的水位线。
+   */
   'stream:resume': {
-    req: z.object({ sessionId: z.string(), fromSeq: z.number() }),
-    res: z.object({ frames: z.array(StreamFrameSchema) })
+    req: z.object({ sessionId: z.string(), epoch: z.string(), fromSeq: z.number() }),
+    res: z.object({
+      /** 主进程**当前**的纪元，便于调用方对齐（`matched` 为假时它就是新值）。 */
+      epoch: z.string(),
+      matched: z.boolean(),
+      /** 只含**在途**帧：已结束的轮次归历史接口（`message:list` / `message:getEvents`）。 */
+      frames: z.array(StreamFrameSchema)
+    })
   },
   'runtime:getState': {
     req: NoPayload,

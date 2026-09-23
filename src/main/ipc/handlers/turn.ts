@@ -6,6 +6,78 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
   const repos = ctx.store.repos
 
   /**
+   * ★ **发一条消息 = 一个事务里的两笔写 + 一次派发。**
+   *
+   * ```
+   * store.tx(() => {                       ← 一个事务
+   *   追加用户消息（空间 seq 在这里分配）
+   *   插入 queued 轮次（trigger_message_id 指向那条消息）
+   * })
+   * runtime.dispatch(turn)                 ← 事务**提交之后**才派发
+   * ```
+   *
+   * 三件事都不能省：
+   *
+   * - **一个事务**：消息与轮次要么都在、要么都不在。分开写的话，中间崩掉会留下
+   *   「用户看到了自己发的消息，而它永远不会被回答」—— 一条没有任何解释的死消息。
+   * - **返回真实的 turnId**（§4.3b）：回一个伪造的 id，UI 会照常渲染出一条
+   *   **永远不会运行的轮次**，用户看到的是「已发送、正在思考」，而实际上什么都没发生。
+   * - **提交之后才派发**：调度器会立刻去库里读那一行。事务还没提交就派发，
+   *   它会读到「不存在」，而这一轮就再也没人管了。
+   *
+   * `trigger_message_id` 指向消息、消息的 `turn_id` 留空 —— 这是一个**单向**的环：
+   * 消息先插（那时还没有轮次 id），而轮次反过来指向它是原子的，所以不需要回填。
+   */
+  r.handle('turn:send', ({ workspaceId, memberId, text, mentions }) => {
+    const member = repos.member.get(memberId)
+    if (!member) throw new NotFoundError('成员', memberId)
+    if (member.workspaceId !== workspaceId) {
+      throw new AppError('E_INVALID_PAYLOAD', '这个成员不属于该空间', {
+        memberId,
+        workspaceId,
+        actualWorkspaceId: member.workspaceId
+      })
+    }
+    if (!member.enabled) {
+      throw new AppError('E_CONFLICT', `成员「${member.displayName}」已停用，发不出去`, { memberId })
+    }
+    // 会话与成员**同生**（`member:create` 里那个事务），所以这一条查不到就是库不一致。
+    const session = repos.session.getByMember(memberId)
+    if (!session) throw new NotFoundError('会话', memberId)
+
+    const cwd = ctx.runtime.cwdFor(workspaceId, memberId).cwd
+    const messageId = ctx.newId()
+    const turnId = ctx.newId()
+    const now = ctx.now()
+
+    const turn = ctx.store.tx(() => {
+      repos.message.append({
+        id: messageId,
+        workspaceId,
+        sessionId: session.id,
+        role: 'user',
+        authorMemberId: memberId,
+        contentText: text,
+        mentions: mentions ?? [],
+        now
+      })
+      return repos.turn.create({
+        id: turnId,
+        sessionId: session.id,
+        workspaceId,
+        triggerMessageId: messageId,
+        cwd,
+        // 用户直接发起 = 0。由 `@` 触发的跳数是 M7 的事（§3.3）。
+        hopDepth: 0,
+        now
+      })
+    })
+
+    ctx.runtime.dispatch(turn)
+    return { turnId: turn.id }
+  })
+
+  /**
    * ⚠️ `listRecentByWorkspace` 按 `started_at DESC` 排序，而**排队中的轮次
    * `started_at` 是 NULL** —— SQLite 的 DESC 把 NULL 排在最后，
    * 所以「刚点了发送、还在排队」的那条会出现在列表**末尾**。
@@ -46,6 +118,12 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
     if (turn.status === 'queued') {
       const cancelled = repos.turn.markCancelled(turnId, ctx.now())
       if (!cancelled) throw new NotFoundError('轮次', turnId)
+      // ★ 库改完了还要告诉调度器一声。**这不是防重复派发的那道锁** ——
+      // 调度器每次取队首都会回库里读一次状态，`cancelled` 的行它自己会跳过
+      // （`scheduler.ts` 的 `pickNext`）。这一行的作用是让**内存队列与库立刻一致**：
+      // 少了它，一个已取消的 id 会一直挂在内部队列里，直到下一次取队首时才被顺手丢掉，
+      // 而 `runtime:getState` 的 `dispatchable` 在那之前会多报一个数。
+      ctx.runtime.cancelQueued(turnId)
       return cancelled
     }
 

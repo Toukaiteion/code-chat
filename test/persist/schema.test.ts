@@ -8,6 +8,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { openStore } from '../../src/main/persist/index.ts'
+import { assertDdlEnumsMatch, ddlCheckedValues } from '../../src/main/persist/ddl-enums.ts'
+import { openDatabase } from '../../src/main/persist/db.ts'
 import type { Store } from '../../src/main/persist/index.ts'
 
 function store(): Store {
@@ -312,4 +314,69 @@ test('message_event 的 kind CHECK 与 ok 可空性', () => {
     /CHECK constraint failed/
   )
   s.close()
+})
+
+// ─────────────────────────────────────────────────────────────
+// ★ 启动断言：TS 枚举 ↔ DDL CHECK（§8.5a 欠的那一条）
+// ─────────────────────────────────────────────────────────────
+
+test('★ 真实的 schema 必须让启动断言通过 —— 六对枚举逐条一致', () => {
+  // 这是那条断言**唯一**证明自己有意义的形态：拿真正的迁移产物去验。
+  // 若某天有人只在 `entities.ts` 里加了一个 kind 而没改迁移，
+  // 这个用例会在这里、以及用户的应用启动时，同时炸掉。
+  const s = openStore(':memory:')
+  assert.doesNotThrow(() => assertDdlEnumsMatch(s.db))
+  s.close()
+})
+
+test('★ 反向对照：DDL 少一项必须炸 —— 否则这条断言只是装饰', () => {
+  // 反向对照是必须的：一条永远不炸的断言，与没有断言在这件事上无法区分。
+  const db = openDatabase(':memory:')
+  try {
+    db.exec(
+      `CREATE TABLE message_event (kind TEXT NOT NULL CHECK (kind IN
+         ('thinking','text','tool_start','tool_result','file_diff','usage','error')))`
+    )
+    assert.throws(
+      () => assertDdlEnumsMatch(db),
+      // 报错必须**点出是谁不一致**，而不是一句「不一致」。少了这一句，
+      // 开发者还得自己去两个文件里做集合比较 —— 那正是这个模块要省掉的工作。
+      /message_event\.kind.*TS 里有而 DDL 拒收：done/s
+    )
+  } finally {
+    db.close()
+  }
+})
+
+test('CHECK 整个不见了比写错了更严重 —— 必须也炸', () => {
+  const db = openDatabase(':memory:')
+  try {
+    // 没有任何 CHECK 的 kind 列：约束蒸发是**不可逆**的静默降级。
+    db.exec(`CREATE TABLE message_event (kind TEXT NOT NULL)`)
+    assert.throws(() => assertDdlEnumsMatch(db), /找不到 CHECK \(kind IN/)
+  } finally {
+    db.close()
+  }
+})
+
+test('表根本不存在时也炸（迁移没跑到）', () => {
+  const db = openDatabase(':memory:')
+  try {
+    assert.throws(() => assertDdlEnumsMatch(db), /表 message_event 不存在/)
+  } finally {
+    db.close()
+  }
+})
+
+test('DDL 解析：跨行的 CHECK、顺序、以及「没有这一列」', () => {
+  // `kind` 那条在真实迁移里是**跨行**写的，所以解析器不能依赖 `.` 不匹配换行。
+  const multiline = `CREATE TABLE t (\n  kind TEXT NOT NULL CHECK (kind IN\n    ('a','b')),\n  other TEXT\n)`
+  assert.deepEqual(ddlCheckedValues(multiline, 'kind'), ['a', 'b'])
+  // 顺序原样保留 —— 顺序也比，见 `assertDdlEnumsMatch` 里那段。
+  assert.deepEqual(ddlCheckedValues(multiline, 'kind'), ['a', 'b'])
+  // 没有这一列 → null，**不是**空数组：空数组会被读成「这一列一项都不收」。
+  assert.equal(ddlCheckedValues(multiline, 'nope'), null)
+  // 列名是子串也不能误撞（`id` 不该匹配到 `user_id` 的 CHECK）。
+  const decoy = `CREATE TABLE t (a TEXT CHECK (a IN ('x')), other_id TEXT CHECK (other_id IN ('y')))`
+  assert.deepEqual(ddlCheckedValues(decoy, 'a'), ['x'])
 })
