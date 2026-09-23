@@ -1,0 +1,12 @@
+启动 pid=22576 marker=MK-MCP-a73e2
+initialize protocolVersion=2025-11-25
+通知 notifications/initialized
+tools/list
+tools/call probe_ping
+stdin 关闭，退出
+启动 pid=35056 marker=MK-MCP-a73e2
+initialize protocolVersion=2025-11-25
+通知 notifications/initialized
+tools/list
+tools/call probe_ping
+stdin 关闭，退出

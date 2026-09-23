@@ -1,0 +1,146 @@
+
+──── M7b 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m7b
+  标记后缀        z45q
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+  两个空间        Sable（4 人，测采集/去重/cc/闸门）· Rill（2 人，测乒乓链）
+
+──── 启动 A · 夹具 ─────────────────────────────────────────────────────────────
+  应用 A 起来了：pid=27196
+  库转储 db-A-setup.json：workspace=2 project=2 actor=6 workspace_member=6 member_project=6 session=6 turn=0 message=0 message_event=0
+  渲染进程重载完成，夹具已在界面上
+
+──── Sable · 打开对话 + Composer 的 @ 采集 ────────────────────────────────────────
+  @ 采集         候选 → chip → 切 cc → 切回来 → 未选中提示（全部在点发送之前）
+
+──── Sable · 第一次发送（@ Nyx、Echo、Juno 三个「派发」） ─────────────────────────────────
+  走界面发了一条：@ Nyx、Echo、Juno（正文 31 字，点击=clicked）
+  A 的轮次 = 4d151d03-4c76-46e2-bcc1-ec7601914550（从 status 推送里认出来的）
+
+──── Sable · 等到「一个在跑、一个在排队」，然后第二次发送（同一段正文） ─────────────────────────────────
+  形状            Nyx=running Juno=queued（hit=true）
+  库转储 db-A-burst.json：workspace=2 project=2 actor=6 workspace_member=6 member_project=6 session=6 turn=4 message=4 message_event=0
+  走界面发了一条：@ Juno、Nyx、Echo（正文 31 字，点击=clicked）
+  A 的轮次 = 253846a4-87f2-4fb6-8d7b-21808ca14c63（从 batch 推送里认出来的）
+
+──── Sable · 等这一批跑完（同时观测并发闸门） ──────────────────────────────────────────────
+  这个空间安静了：5.0s，最大并发 3/3，最大队列 4
+  终态行在 done 帧之后 2ms 落库（status=done）
+  装配形状        拉了 7 条 [ctx] 进归档
+  库转储 db-A-final.json：workspace=2 project=2 actor=6 workspace_member=6 member_project=6 session=6 turn=7 message=16 message_event=23
+
+──── Rill · 切空间 + 采集一遍（顺带验切换之后发言者回落到第一个人） ──────────────────────────────────
+  @ 采集         候选 → chip → 切 cc → 切回来 → 未选中提示（全部在点发送之前）
+
+──── Rill · 第一跳：用户 → Vex（回复里会点名 Wisp） ──────────────────────────────────────
+  走界面发了一条：@ Wisp（正文 59 字，点击=clicked）
+  A 的轮次 = 56b61261-e7bc-4b7c-b6e1-85e750904ba6（从 status 推送里认出来的）
+
+──── Rill · 等链走完（2 跳警告、4 跳终止都在这段里） ─────────────────────────────────────────
+  这个空间安静了：5.3s，最大并发 2/3，最大队列 1
+  装配形状        拉了 3 条 [ctx] 进归档
+  库转储 db-A-chain.json：workspace=2 project=2 actor=6 workspace_member=6 member_project=6 session=6 turn=10 message=23 message_event=56
+
+──── 收尾 · 让 A 正常退出 ─────────────────────────────────────────────────────────
+  A 正常退出 —— 这一条会如实进报告
+
+──── 采集结束 ──────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m7b-2026-09-23T17-49-39-397Z
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  归档            G:\project\code-chat\scripts\evidence\m7b-2026-09-23T17-49-39-397Z
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m7b
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个）
+  标记后缀        z45q
+  Sable           4 人（Atlas 发言）· 测采集 / ① 一次 @ 多个 / ⑤ 去重 / cc / ⑥ 并发闸门
+  Rill            2 人（Vex 发言）· 测 ② agent 接力 / ③ 2 跳警告 / ④ 4 跳终止
+  ⚠️ 全部结论只在**本机默认凭据所指向的那个端点**下成立，不是 Anthropic 官方行为。
+     而「模型会不会在回复末尾写 `<mentions>`」**是端点的行为**，不是本应用的行为 ——
+     所以 Rill 那三条只在这个端点下成立，换端点要重跑。
+  ✅ 归档里有本次的标记后缀与两条消息正文 —— 报告的一半判据是「两次发送的正文逐字相同」，丢了它就等于丢了判据
+  ✅ 两个空间的夹具 id 都在归档里
+
+──── 观测通道 · 三条都在吗 ──────────────────────────────────────────────────────────
+  [ctx] 10 条 · [runtime:…] 13 条 —— [adapter-diag:result-subtype adapter-diag:result-subtype adapter-diag:result-subtype fanout:ping-pong-warn adapter-diag:result-subtype adapter-diag:result-subtype adapter-diag:result-subtype adapter-diag:result-subtype adapter-diag:result-subtype adapter-diag:result-subtype fanout:mention-self adapter-diag:result-subtype fanout:mentions-malformed]
+  推送到的 app:notice 3 条
+  ✅ 主进程 stdout 里的 `[ctx]` 行拉到了 10 条 —— 它只证明这几轮真的走过装配那一段（装配形状本身是 M7a 的判据）
+
+──── Sable A1 · Composer 的 @ 采集（真机里那一段） ────────────────────────────────────
+  ✅ 候选浮层、里面有 Nyx、没有发言者自己（实得 {"open":true,"names":["Nyx"]}）
+  ✅ chip 出现、点一下切「抄送」（["@Nyx"] → ["@Nyx（抄送）"]）
+  ✅ ★ 第一条用户消息的 `mentions_json` = 界面上那三个 chip（[{"memberId":"a3e5c152-7206-4a65-9de0-d17b862f1007","kind":"to"},{"memberId":"6d6a2f73-6cc3-4f7a-b56b-d1c6b35f2ffc","kind":"to"},{"memberId":"b2fb1f88-ae97-4cb0-b11b-7acc524d38b4","kind":"to"}]）—— 派发依据是这一列，不是正文里的文本
+  ✅ 三个 mention 的 `kind` 都是 `to`（第一次发送里一个 cc 都没有）
+
+──── Sable A2 · ① 一次 @ 三个成员 → 三条转述 + 三条 1 跳轮次 ──────────────────────────────
+  burst 时点：轮次 4 条，深度分布 0:1 1:3
+  ✅ ★ 一次 @ 三个成员 ⇒ 用户那一轮（0 跳）+ **三条 1 跳轮次**（实得 4 条：0 跳 1 / 1 跳 3，期望 4 / 1 / 3）—— 跳数在 `turn.create` 之前就算好了（§3.3：`hop_depth` 没有 updater），而「用户直接发起 = 0」是链的打断点
+  ✅ Nyx 的会话里有一条**转述消息**（作者 = 发言者 Atlas）+ 一条 1 跳轮次；正文开头是「【派发】…」（实得 【派发】Atlas 在刚发的那条消息里 @ 了你，把这件事交给你。 —— 以下是原文 —— @Nyx @Echo @Ju…（共 94 字））
+  ✅ Echo 的会话里有一条**转述消息**（作者 = 发言者 Atlas）+ 一条 1 跳轮次；正文开头是「【派发】…」（实得 【派发】Atlas 在刚发的那条消息里 @ 了你，把这件事交给你。 —— 以下是原文 —— @Nyx @Echo @Ju…（共 94 字））
+  ✅ Juno 的会话里有一条**转述消息**（作者 = 发言者 Atlas）+ 一条 1 跳轮次；正文开头是「【派发】…」（实得 【派发】Atlas 在刚发的那条消息里 @ 了你，把这件事交给你。 —— 以下是原文 —— @Nyx @Echo @Ju…（共 94 字））
+  ✅ 派出去的那三轮都有 cwd，且等于项目根（["C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\src-proj","C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\src-pro…（共 245 字））
+
+──── Sable A3 · ⑤ 去重（同一对内容在排队尾部）+ cc + 「running 不算尾部」 ──────────────────────
+  第二次发送那一刻：Nyx=running Juno=queued（hit=true）
+  ❌ ★ 两条消息发完之后：Nyx 2 条轮次（第二条消息里它在**跑** ⇒ 照常再派）、Juno 2 条（它在**排队** ⇒ 命中去重，没有重复派）、Echo 1 条（只被「cc」）—— 期望 2 / 1 / 1
+  ✅ ★ 前提成立：第二次发送时 Nyx 那一跳**正在跑**，而它照样被重派了一次 —— §4.5b 逐字：「一旦那一跳**已经执行过**，同一个成员**可以**再次被派发」
+  ⚠️ ★ 前提成立：Juno 那一跳在**排队**（尾部），第二条消息仍然给它写了一条转述（共 4 条）但**没有**再建轮次 —— 这就是第 2 条熔断在真机上的样子
+  ❌ ★ `cc` 真的实现了吗：Echo 的会话里有 **两条** 转述消息，第二条开头是「【抄送】…抄送了你」且写明「你不需要行动」（实得 收到，不做任何事。）—— 只进 schema 不实现，就是「界面上标了 cc、实际什么都没发生」
+  ⚠️ ⚠️ 归档里没有 fanout:mention-deduped —— 去重的**判决**这一次没被观测到（报告仍能看到结果）
+
+──── Sable A4 · ⑥ 广播时同时 running ≤ 3 ────────────────────────────────────────
+  观测：7 条活轮次的峰值，最大并发 3/3，最大队列 4
+  ✅ ★ 并发上限是 3（实得 3），而观测到的最大并发 3 **从没超过它**
+  ✅ ★ 观察到过**排队** —— 这才是「闸门真的在拦」的证据（没排过队也可能只是没超过上限）。广播风暴那个产品形态（§4.5b 第 3 条）**没有第四个机制**，槽位就是它唯一的闸门
+
+──── Rill B1 · ② A 的回复里 @ B → B 被派发（本里程碑最核心的一条） ────────────────────────────
+  ✅ 切到 Rill 之后发言者是该空间的第一个成员（实得 "Vex"，期望 "Vex"）—— 「不信任本地状态」在这一处唯一要做对的事
+  Rill 的轮次：3 条 —— Vex@0跳(done) → Wisp@1跳(done) → Wisp@1跳(done)
+  ✅ ★ 第一跳（Vex）的回复末尾有标记块：`<mentions>Wisp</mentions>` —— 派发的**唯一依据**就是它（§5.4：没有块 = 没有派发，不是猜错）
+  ✅ ★ 第二跳落在 **Wisp 的会话**里、深度 1（实得 Wisp@1）—— 派给 B 的那一轮 hop_depth = A.hop_depth + 1（§3.3）
+  ❌ ★ 转述正文：写了「【派发】Vex …@ 了你」、写了「<mentions> 那一行已由本应用取出」、**没有**把那一行本身转述过去（实得 【派发】Vex 在刚发的那条消息里 @ 了你，把这件事交给你。 —— 以下是原文 —— @Wisp 不要使用任何工具。 先回一句「收到」。 然后在回复的最后单独写一行：<mentions>Wisp</mentions>）
+
+──── Rill B2 · ③ 2 跳无实质工作 → 警告 + 库里一条 system 事件 ────────────────────────────
+  ✅ ★ 前提成立：这几跳**一个工具都没用**（tool_start 合计 0）—— 空转计数才有意义
+  ✅ ★ 库里有一条持久的 `role:'system'` 事件，落在**链所在的那个会话**（Wisp）里，且 `turn_id` 是 NULL（实得 null）—— 它是乒乓的**可见痕迹**；写进空间流会让别的成员也看到
+  ✅ ★ 那条 system 事件的正文里**一个数字都没有** —— `Turn.hopDepth` 逐字：「绝不进入提示词上下文」（它在历史里会被当成一条历史消息，所以它自己也不能带跳数）
+  ✅ ★ 界面上真的收到了一条 `app:notice`（level=warning）—— 警告必须**用户看得见**，只在日志里说一声等于没说
+  ✅ ★ 生产路径上真的报出了 fanout:ping-pong-warn —— 判决发生在 fanout.ts 里，报告只是读它
+
+──── Rill B3 · ④ 4 跳 → 链被强制终止 ──────────────────────────────────────────────
+  ❌ ★ 链一共 **4 跳**就停了（深度 [0,1,1]）—— 用户那一跳是 0 跳、之后每跳 +1，连续空转到第 4 跳时强制终止，所以**第 5 跳永远不该出现**
+  ⚠️ ⚠️ 最后一跳的回复里没有标记块 ⇒ 「没有第 5 跳」也可能只是模型没点名，两者分不开 ⇒ 无法判定
+  ❌ ❌ 没有「已被自动终止」那条 system 事件 —— 终止这件事在库里没有痕迹
+  ❌ ★ 生产路径上真的报出了 `fanout:ping-pong-terminate`（带上了整条链的 `{hopDepth, hadWork}`）
+  ✅ ★ 四跳全部 `done`、最后一跳有正文（56 字）—— 「强制终止」是「不建新轮次 + 取消排队」，**不含** abort 一个正在跑的轮次（那是 M9 的中断阶梯）
+
+──── Rill B4 · ④ 的「排队中的同链条轮次被取消」 ───────────────────────────────────────────
+  ⚠️ ⚠️ **这一次没测到**，而这是**形状决定的、不是失败**：线性乒乓链的每一跳都是上一跳结束之后才建的，所以终止那一刻队列本来就是空的 —— 这条分支在**本形状下不可达**。它的判据在 `test/process/fanout.test.ts`（那里用夹具造出了一个能被链上某一跳认领的 queued 跳）。★ 不许把这一条读成「测了没事」。
+  ✅ ★ 同时，**没有**任何一跳被误取消 —— 「宁可漏杀不可错杀」在这一形状下也没误伤
+
+──── 库里的卫生（不该出现的那些） ────────────────────────────────────────────────────────
+  ✅ **没有** fanout:chain-tail-missing —— 它出现就说明有一条派发路径被迫降级了
+  ✅ **没有** fanout:dedupe-basis-skipped —— 它出现就说明有一条派发路径被迫降级了
+  ✅ **没有** fanout:target-session-missing —— 它出现就说明有一条派发路径被迫降级了
+  ❌ **没有** fanout:mentions-malformed —— 它出现就说明有一条派发路径被迫降级了
+  ✅ **没有** fanout:actor-missing —— 它出现就说明有一条派发路径被迫降级了
+  ✅ Sable 里没有出现 2 跳以上的轮次 —— 那个空间的人设**没有**接力指令，所以「Sable 没有 agent 之间的链」这个前提成立（它是 A2/A3 计数判据的地基）
+
+──── 旁证（**不是断言**） ──────────────────────────────────────────────────────────
+  [notice] {"level":"warning","message":"协作链已经连续几跳没有实际动作（只有来回发言），再这样下去会被自动终止","detail":{"turnId":"14b81a67-f71f-4985-a69d-05cb863cb378","emptyHops":2}}
+  [notice] {"level":"warning","message":"协作链已经连续几跳没有实际动作（只有来回发言），再这样下去会被自动终止","detail":{"turnId":"7a13b21b-8f51-4012-ac31-c590370e13a6","emptyHops":2}}
+  [notice] {"level":"warning","message":"「Wisp」@ 了它自己，已跳过（那会是一条自己派给自己的链）","detail":{"tag":"mention-self","turnId":"7a13b21b-8f51-4012-ac31-c590370e13a6","detail":{"memberId":"e9e96860-3bd2-42fc-aee2-4cebac99d588…（共 204 字）
+  [A:startup] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，…（共 261 字）
+  [A:sable.pane] CODE CHAT 工作空间 Sable ⚙ Rill ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m7b\src-proj 成员 + 添加 Atlas Sable-Atlas · 主项目 sandbox 启用 Nyx Sable-Nyx · 主项目 sandbox 启用 Echo Sable-Ech…（共 378 字）
+  [A:after-sable] CODE CHAT 工作空间 Sable ⚙ Rill ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m7b\src-proj 成员 + 添加 Atlas Sable-Atlas · 主项目 sandbox 启用 Nyx Sable-Nyx · 主项目 sandbox 启用 Echo Sable-Ech…（共 1251 字）
+  [A:rill.pane] CODE CHAT 工作空间 Sable ⚙ Rill ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m7b\src-proj 成员 + 添加 Vex Rill-Vex · 主项目 sandbox 启用 Wisp Rill-Wisp · 主项目 sandbox 启用 角色库 M6b · 流式对话 Ril…（共 361 字）
+  [A:after-rill] CODE CHAT 工作空间 Sable ⚙ Rill ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m7b\src-proj 成员 + 添加 Vex Rill-Vex · 主项目 sandbox 启用 Wisp Rill-Wisp · 主项目 sandbox 启用 角色库 M6b · 流式对话 Ril…（共 936 字）
+  批次帧 45 批（正文都在 batches.jsonl 里，逐字）
+
+──── 结束 ────────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m7b-2026-09-23T17-49-39-397Z
+  结论     7 条不通过（另有 4 条「无法判定」）
+  ⚠️ 端点限定语：全部结论只在**本机默认凭据所指向的端点**下成立，不是 Anthropic 官方行为。
+  ⚠️ Rill 那三条（②③④）还多一条前提：**模型得在回复末尾写那个标记块**。
+     没写 = 没派发（§5.4 的失败形态，可观测）—— 那时的判据是「无法判定」，不是「通过」。
+  ⚠️ 一条留白：④ 里「终止时取消排队中的同链条轮次」在线性链下**不可达**（见 B4）。

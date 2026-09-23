@@ -334,6 +334,89 @@ test('压缩只改对话内容，不碰控制状态（§3.3）', () => {
   s.close()
 })
 
+test('★ 会话历史要**最近** N 条（不是最旧 N 条），且按 seq 升序回来', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+
+  // ★ 造第二个会话**必须先造第二个成员** —— `session` 上有
+  // `UNIQUE(workspace_id, member_id)`，也就是「一个成员在一个空间里只有一个会话」。
+  // 这条约束同时说明了 §3.1 那个粒度错位为什么是真的会出事：
+  // 会话是**每成员一条**，而 `message.seq` 是**空间级全序**，
+  // 所以 workspace 粒度的压缩一定会碰到别的成员的消息。
+  const actor2 = s.repos.actor.create({
+    id: 'a2',
+    name: 'Nyx',
+    model: 'deepseek-flash',
+    personaPath: 'personas/nyx.md',
+    personaHash: 'h2',
+    now: NOW
+  })
+  const member2 = s.repos.member.create({
+    id: 'm2',
+    workspaceId,
+    actorId: actor2.id,
+    displayName: '写手',
+    now: NOW
+  })
+  const other = s.repos.session.create('sess2', workspaceId, member2.id, NOW)
+
+  for (let i = 1; i <= 5; i++) {
+    s.repos.message.append({
+      id: `recent-${i}`,
+      workspaceId,
+      sessionId,
+      role: 'user',
+      contentText: `本会话第 ${i} 条`,
+      now: NOW + i
+    })
+  }
+  for (let i = 1; i <= 2; i++) {
+    s.repos.message.append({
+      id: `other-${i}`,
+      workspaceId,
+      sessionId: other.id,
+      role: 'user',
+      contentText: `别的会话第 ${i} 条`,
+      now: NOW + 100 + i
+    })
+  }
+  // 空间时间线上的消息（`session_id` 为 NULL，人类用户直接发的那种）也不许混进来。
+  s.repos.message.append({
+    id: 'space-1',
+    workspaceId,
+    role: 'user',
+    contentText: '空间流里的一条',
+    now: NOW + 200
+  })
+
+  const got = s.repos.message.listRecentBySession(sessionId, 3)
+  assert.deepEqual(
+    got.map((m) => m.contentText),
+    ['本会话第 3 条', '本会话第 4 条', '本会话第 5 条'],
+    '★ 给上下文装配用的窗口必须是**最近**的，否则第二轮就看不到刚说过的第一轮'
+  )
+  assert.deepEqual(
+    got.map((m) => m.seq),
+    [...got.map((m) => m.seq)].sort((a, b) => a - b),
+    '调用方拿到的永远是「老 → 新」'
+  )
+  assert.equal(
+    got.some((m) => m.id === 'space-1'),
+    false,
+    '空间流（session_id 为 NULL）是另一条时间线，不许混进会话窗口'
+  )
+
+  // ★ 反向对照：`listBySession` 取的是**最旧**的 N 条。两者只差一个 `DESC`，
+  // 所以拿错的那个从 M2 起一直没被发现 —— 它不报错，只是把一个长会话的
+  // **最近几轮换成了最早几轮**。这一条断言把「两个方法确实不同」钉住。
+  assert.deepEqual(
+    s.repos.message.listBySession(sessionId, 3).map((m) => m.contentText),
+    ['本会话第 1 条', '本会话第 2 条', '本会话第 3 条']
+  )
+
+  s.close()
+})
+
 // ─────────────────────────────────────────────────────────────
 // §4.4 孤儿清扫
 // ─────────────────────────────────────────────────────────────
@@ -531,5 +614,131 @@ test('★ 外层事务回滚时，内层已提交的写操作一并撤销', () =
 
   assert.equal(s.repos.message.get('msg-doomed'), null, '内层的 COMMIT 必须只是 RELEASE SAVEPOINT')
   assert.equal(s.repos.message.listRecent(workspaceId, 10).length, 0)
+  s.close()
+})
+
+// ─────────────────────────────────────────────────────────────
+// M7b 新增的两个读者：`listByTurn` 与 `listRecentByQueuedAt`
+// ─────────────────────────────────────────────────────────────
+
+test('★ `listByTurn` 拿到的是「**这一轮自己的产物**」—— 用户那条触发消息不在里面', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+
+  // 顺序就是生产的顺序（`handlers/turn.ts`）：**先**插用户消息（那时轮次还不存在），
+  // **再**建轮次并让它回指那条消息。所以 `message.turn_id` 在用户行上是 NULL。
+  const user = s.repos.message.append({
+    id: 'msg-trigger',
+    workspaceId,
+    sessionId,
+    role: 'user',
+    contentText: '请把 a.ts 的 x 改成 2',
+    now: NOW
+  })
+  const turn = s.repos.turn.create({
+    id: 'turn-1',
+    sessionId,
+    workspaceId,
+    triggerMessageId: user.id,
+    cwd: 'G:/work/mine',
+    now: NOW
+  })
+  const reply = s.repos.message.append({
+    id: 'msg-reply',
+    workspaceId,
+    sessionId,
+    turnId: turn.id,
+    role: 'assistant',
+    contentText: '改好了。\n<mentions>Nyx</mentions>',
+    now: NOW + 1
+  })
+
+  const produced = s.repos.message.listByTurn(turn.id)
+  assert.deepEqual(
+    produced.map((m) => m.id),
+    [reply.id],
+    '★ 这一条正是扇出要读的「这一轮的回复」—— 混进触发消息的话，'
+      + '被 @ 的人会看到用户自己写的话被当成模型的回复再转述一遍'
+  )
+  assert.equal(s.repos.message.get(user.id)?.turnId, null, '用户行的 turn_id 就是 NULL（协议如此，不是缺数据）')
+  assert.equal(s.repos.turn.get(turn.id)?.triggerMessageId, user.id, '要拿触发消息就走轮次这一头')
+
+  s.close()
+})
+
+test('★ `listRecentByQueuedAt` 按**发起顺序**取，连排队中的一起；`listRecentByWorkspace` 办不到', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+  const actor2 = s.repos.actor.create({
+    id: 'a2',
+    name: 'Nyx',
+    model: 'deepseek-flash',
+    personaPath: 'personas/nyx.md',
+    personaHash: 'h2',
+    now: NOW
+  })
+  const member2 = s.repos.member.create({
+    id: 'm2',
+    workspaceId,
+    actorId: actor2.id,
+    displayName: '写手',
+    now: NOW
+  })
+  const other = s.repos.session.create('sess2', workspaceId, member2.id, NOW)
+
+  // 第一条：发起得早、也跑得早。
+  const early = s.repos.turn.create({
+    id: 't-early',
+    sessionId,
+    workspaceId,
+    hopDepth: 0,
+    cwd: 'G:/work/mine',
+    now: NOW + 1
+  })
+  s.repos.turn.markRunning(early.id, NOW + 2)
+  s.repos.turn.setPid(early.id, 4242)
+  s.repos.turn.finish(early.id, 'done', {}, NOW + 3, 0)
+
+  // 第二条：发起得晚，但在队列里**等了一会**才开始（并发槽位被占着 —— 这是常态）。
+  const waited = s.repos.turn.create({
+    id: 't-waited',
+    sessionId: other.id,
+    workspaceId,
+    hopDepth: 1,
+    cwd: 'G:/work/mine',
+    now: NOW + 4
+  })
+  s.repos.turn.markRunning(waited.id, NOW + 20)
+  s.repos.turn.setPid(waited.id, 4243)
+  s.repos.turn.finish(waited.id, 'done', {}, NOW + 21, 0)
+
+  // 第三条：刚派出去、**还没跑**（`started_at` 为 NULL，状态 `queued`）。
+  const fresh = s.repos.turn.create({
+    id: 't-fresh',
+    sessionId,
+    workspaceId,
+    hopDepth: 2,
+    cwd: 'G:/work/mine',
+    now: NOW + 30
+  })
+
+  assert.deepEqual(
+    s.repos.turn.listRecentByQueuedAt(workspaceId, 10).map((t) => t.id),
+    [early.id, waited.id, fresh.id],
+    '★ 链的判据要的是「连排队中的一起、按发起顺序」—— 这就是它和 `listRecentByWorkspace` 的分工'
+  )
+
+  // ★ 反向对照：`listRecentByWorkspace` 按 `started_at DESC` 排。
+  // 两者**真的不同**，而且差在最要紧的那一条上：`listRecentByQueuedAt` 把刚派出去、
+  // 还没跑的那一跳放在**尾部**（链判据正是从尾部往前看），而按 `started_at` 排
+  // 它会掉到最末 —— 后缀断在它那里，熔断永远数不满。
+  const byStarted = s.repos.turn.listRecentByWorkspace(workspaceId, 10)
+  assert.deepEqual(
+    byStarted.map((t) => t.id),
+    [waited.id, early.id, fresh.id],
+    '按 started_at 倒序：等得久的那条排第一（发起顺序被丢掉了）'
+  )
+  assert.notDeepEqual(byStarted.map((t) => t.id), [early.id, waited.id, fresh.id])
+
   s.close()
 })

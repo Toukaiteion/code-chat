@@ -106,7 +106,7 @@ test('★ `turn:send` 返回的 turnId 在库里真的有一行（§4.3b：不�
   const row = h.store.repos.turn.get(turnId)
   assert.ok(row, '★ 回一个库里没有的 id，就是「永远不会运行的轮次」')
   assert.equal(row.workspaceId, workspaceId)
-  assert.equal(row.hopDepth, 0, '用户直接发起 = 0（`@` 触发的跳数是 M7）')
+  assert.equal(row.hopDepth, 0, '用户直接发起 = 0；`@` 派出去的那些才是 1 跳往上（§3.3，M7b 起）')
   assert.equal(row.cwd.length > 0, true, 'cwd 是 NOT NULL，必须已经算好')
 
   const msg = userMessage(h, workspaceId)
@@ -459,4 +459,94 @@ test('脚本一行都不吐（正常退出）→ 状态是终态，不许停在 
   await h.runtime.idle()
   const row = h.store.repos.turn.get(turnId)
   assert.ok(['done', 'failed'].includes(row?.status ?? ''), `实际 ${row?.status} —— 停在 running 就是一条僵尸`)
+})
+
+// ─────────────────────────────────────────────────────────────
+// 七、M7b：`turn:send` 的结构化 `@`（§5.1 的跳 3-5 + 用户侧的扇出）
+// ─────────────────────────────────────────────────────────────
+
+/** 再拉一个成员进同一个空间（`@` 要有第二个人才验得动）。 */
+async function addMember(
+  h: Harness,
+  workspaceId: string,
+  name: string
+): Promise<{ memberId: string; sessionId: string }> {
+  const actorId = await makeActor(h, name)
+  return makeMember(h, workspaceId, actorId, name)
+}
+
+test('★★ 用户 `@` 另一个成员 → 对方会话收到一条转述消息，且多了一条 1 跳的轮次', async () => {
+  // 这是 M7b 在 IPC 层唯一一条端到端：渲染层采集的结构化 mention 从
+  // `turn:send` 进来 → handler 校验 → `runtime.fanoutUserMentions` → `process/fanout`
+  // → 对方的会话与轮次。真调度器、真适配器、真合批器，只换了那个原生二进制。
+  const { h, workspaceId, memberId, sessionId } = await scene({ cliLaunch: fakeCli('--fake-scenario=empty') })
+  const nyx = await addMember(h, workspaceId, 'Nyx')
+
+  const { turnId } = expectOk<{ turnId: string }>(
+    await h.call('turn:send', {
+      workspaceId,
+      memberId,
+      text: '这块归你，@Nyx 接着看。',
+      mentions: [{ memberId: nyx.memberId, kind: 'to' }]
+    })
+  )
+
+  const target = h.store.repos.turn.listBySession(nyx.sessionId).at(-1)
+  assert.ok(target, '★ A 的一条消息能派出 B 的一轮 —— M7b 的核心那条')
+  assert.equal(target.hopDepth, 1, '用户直接发起是 0，它 @ 出去的是 1（§3.3）')
+  assert.notEqual(target.id, turnId)
+
+  const relay = target.triggerMessageId ? h.store.repos.message.get(target.triggerMessageId) : null
+  assert.equal(relay?.role, 'user')
+  assert.equal(relay?.sessionId, nyx.sessionId, '★ 搬的是**对方的**会话')
+  assert.equal(relay?.authorMemberId, memberId, '署名是发话的人')
+  assert.ok(relay?.contentText?.includes('接着看'), '搬的是原话')
+  assert.ok(relay?.contentText?.includes('在刚发的那条消息里'), '`via: message` —— 下游要知道这话是从哪来的')
+  assert.deepEqual(relay?.mentions, [{ memberId: nyx.memberId, kind: 'to' }])
+
+  // 自己这一轮不受影响。
+  assert.equal(h.store.repos.turn.get(turnId)?.hopDepth, 0)
+  assert.equal(h.store.repos.turn.get(turnId)?.sessionId, sessionId)
+  await h.runtime.idle()
+})
+
+test('不带 `mentions` → 一个轮次都不多建（反向对照）', async () => {
+  const { h, workspaceId, memberId } = await scene({ cliLaunch: fakeCli('--fake-scenario=empty') })
+  const nyx = await addMember(h, workspaceId, 'Nyx')
+  await h.call('turn:send', { workspaceId, memberId, text: '我自己看着办。' })
+  await h.runtime.idle()
+
+  assert.deepEqual(
+    h.store.repos.turn.listBySession(nyx.sessionId),
+    [],
+    '没有 `mentions` 就没有扇出 —— 运行时不解析正文里的 `@`（§3.1）'
+  )
+})
+
+test('★ `@` 的目标无效（自己 / 不存在 / 已停用）→ `E_INVALID_PAYLOAD`，**不静默丢弃**', async () => {
+  // 四种判据（存在 / 同空间 / enabled / 不是自己）只有一份实现，
+  // 而 IPC 这条路的失败语义是**整条消息发不出去**：用户当场就能改。
+  // 静默丢掉一个他明确点的人，是界面在说谎。
+  const { h, workspaceId, memberId } = await scene({ cliLaunch: fakeCli('--fake-scenario=empty') })
+  const nyx = await addMember(h, workspaceId, 'Nyx')
+
+  for (const [label, mentions] of [
+    ['自己', [{ memberId, kind: 'to' as const }]],
+    ['不存在', [{ memberId: '查无此人', kind: 'to' as const }]],
+    ['已停用', [{ memberId: nyx.memberId, kind: 'to' as const }]]
+  ] as const) {
+    if (label === '已停用') h.store.repos.member.setEnabled(nyx.memberId, false, h.ctx.now())
+    const err = expectFail(
+      await h.call('turn:send', { workspaceId, memberId, text: 'x', mentions: [...mentions] })
+    )
+    assert.equal(err.code, 'E_INVALID_PAYLOAD', `${label}：应当整条拒绝`)
+    assert.ok(err.message.includes('@ 的目标无效'), `${label}：错误要说人话，实际「${err.message}」`)
+  }
+
+  assert.equal(
+    h.store.db.prepare(`SELECT COUNT(*) AS n FROM turn WHERE workspace_id = ?`).get(workspaceId)?.['n'],
+    0,
+    '★ 校验失败时**什么都不该发生** —— 连自己那一轮也不许建'
+  )
+  await h.runtime.idle()
 })

@@ -1,9 +1,13 @@
 import type { AdapterRegistry } from '../adapters/registry.ts'
 import type { ChildRegistry } from './child-registry.ts'
 import type { Store } from '../persist/index.ts'
-import type { Turn } from '../../shared/entities.ts'
+import type { Mention, Turn } from '../../shared/entities.ts'
+import type { ContextShape } from '../domain/context-builder.ts'
+import type { PushOf } from '../../shared/ipc/contract.ts'
 import { spacePaths } from '../infra/space-dir.ts'
+import { readTextFile } from '../infra/text-file.ts'
 import { createEventBatcher, type BatcherStore, type EventBatcher, type ResumeResult, type StatusPayload, type StreamBatch, type UnreadPayload, type ViewLike } from './event-batcher.ts'
+import { createFanout, type Fanout } from './fanout.ts'
 import { createScheduler, type Scheduler, type SchedulerState, type StartupSweep } from '../domain/scheduler.ts'
 import { createTurnRunner } from '../domain/turn-runner.ts'
 import { resolveTurnCwd, type CwdDecision } from '../domain/turn-cwd.ts'
@@ -52,6 +56,17 @@ export interface RuntimeOptions {
    * 那本来就是跨空间的（见 `event-batcher` 的文件头与 `channels.ts` 的四条白名单）。
    */
   emitStatus(payload: StatusPayload): void
+  /**
+   * ★ `app:notice` 的生产者（M7b 加的第四件回调，与前三件同理）。
+   *
+   * 在 M7b 之前这条通道**只有启动期**在用（`main/index.ts` 的 `notify()`）——
+   * 而 §4.5b 要求乒乓熔断「弹一条**可见**警告（UI 提示 + 一条系统事件，落库）」，
+   * 那条可见警告就是它。**不抑制**（与 `emitStatus` 同理）：它不是流内容。
+   *
+   * ★ 它**必须注入**：本文件不 import electron、`ipc/` 也不认识它 ——
+   * 装配处（`main/index.ts` / `test/ipc/helpers.ts`）自己决定怎么接。
+   */
+  emitNotice(notice: PushOf<'app:notice'>): void
   now(): number
   newId(): string
   onWarn(tag: string, message: string, detail?: unknown): void
@@ -64,6 +79,10 @@ export interface RuntimeOptions {
   flushMs?: number
   /** `workspace:unread` 的节流间隔（§4.3：≤1Hz）。 */
   unreadMs?: number
+  /** 会话历史的**取数**上限（见 `turn-runner.DEFAULT_HISTORY_LIMIT`）。 */
+  historyLimit?: number
+  /** ★ 装配形状的观测缝 —— **只传形状、不传正文**（见 `TurnRunnerOptions.onContextBuilt`）。 */
+  onContextBuilt?(turnId: string, shape: ContextShape): void
 }
 
 export interface Runtime {
@@ -84,6 +103,20 @@ export interface Runtime {
    */
   dispatch(turn: Turn): void
   cancelQueued(turnId: string): void
+  /**
+   * 用户在 `turn:send` 里结构化 `@` 的那条路（§5.1 的跳 1-4）。
+   *
+   * 它**不是**第二个派发入口：里面最终仍然只调 `dispatch`（§4.5a 规则一）——
+   * 加这一层是为了让 `handlers/turn.ts` 不必拿到扇出对象，
+   * 也不必知道去重基准 / 转述正文这些事。
+   * 调用方必须在**自己那个事务提交之后**调它（它会立刻回库里读会话与成员）。
+   */
+  fanoutUserMentions(input: {
+    workspaceId: string
+    authorMemberId: string
+    text: string
+    mentions: readonly Mention[]
+  }): void
   /**
    * 把一次状态切换推出去。**只给 `turn:stop` 用** —— 那是唯一一个在 handler 里
    * 写终态的路径（把 `queued` 翻成 `cancelled`，`handlers/turn.ts`）。
@@ -150,13 +183,86 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(opts.unreadMs !== undefined ? { unreadMs: opts.unreadMs } : {})
   })
 
+  /**
+   * cwd 的**唯一**解析点（三级兜底）。
+   *
+   * 抽成函数是因为它现在有两个调用方：`turn:send`（`runtime.cwdFor`）与扇出的转述派发
+   * （派给别人的那一轮也要有 cwd，且必须按**对方**算）。两处各写一遍就会分叉 ——
+   * 而分叉的表现是「界面上说将在 A 里跑，实际在 B 里跑」。
+   */
+  function runtimeCwdFor(workspaceId: string, memberId: string): CwdDecision {
+    const workspace = store.repos.workspace.get(workspaceId)
+    if (!workspace) throw new Error(`空间 ${workspaceId} 不存在，算不出 cwd`)
+    return resolveTurnCwd({
+      memberPrimaryProjectId: store.repos.member.primaryProjectId(memberId),
+      workspaceActiveProjectId: workspace.activeProjectId,
+      projects: store.repos.project.listByWorkspace(workspaceId),
+      scratchPath: spacePaths(opts.workspaceRoot, workspace.dirName).scratch
+    })
+  }
+
+  /**
+   * ★ 扇出编排（M7b）。**它拿到的是 `dispatch` / `cancelQueued` 这两个注入进来的函数值**，
+   * 而那两件东西的实现只可能是下面 `scheduler` 那两个调用 —— 于是
+   * 「谁有权把一个轮次送进管道」这件事仍然只有一个答案（§4.5a 规则一）。
+   *
+   * ⚠️ 定义顺序：它引用的 `scheduler` 在下面才建（`dispatch` 要等调度器存在）。
+   * 这里用「箭头函数闭包里读」而不是把扇出挪到调度器之后 ——
+   * 因为 `createTurnRunner` 要在扇出**之前**建（runner 要拿到 `fanout.onTurnFinished`）。
+   * 两个东西互为先后，所以第二个引用放在了**运行时**才求值的位置（照 `main/index.ts`
+   * 里那个 registry 环的先例：环的方向一眼可见，而不是靠一个 setter 注入）。
+   */
+  const fanout: Fanout = createFanout({
+    store: {
+      tx: store.tx,
+      turn: {
+        get: (id) => store.repos.turn.get(id),
+        listLive: () => store.repos.turn.listLive(),
+        listRecentByQueuedAt: (workspaceId, limit) =>
+          store.repos.turn.listRecentByQueuedAt(workspaceId, limit),
+        create: (input) => store.repos.turn.create(input),
+        markCancelled: (id, now) => store.repos.turn.markCancelled(id, now)
+      },
+      message: {
+        get: (id) => store.repos.message.get(id),
+        append: (input) => store.repos.message.append(input),
+        listByTurn: (turnId) => store.repos.message.listByTurn(turnId),
+        listEventsByKind: (messageId, kind) => store.repos.message.listEventsByKind(messageId, kind)
+      },
+      member: {
+        get: (id) => store.repos.member.get(id),
+        listByWorkspace: (workspaceId) => store.repos.member.listByWorkspace(workspaceId)
+      },
+      session: {
+        get: (id) => store.repos.session.get(id),
+        getByMember: (memberId) => store.repos.session.getByMember(memberId)
+      }
+    },
+    // ★ cwd 按**被派发方**算（三级兜底），所以给的是运行时自己的那个解析器 ——
+    //   与 `turn:send` 用的是同一个函数，两处不可能算出不同的目录。
+    cwdFor: (workspaceId, memberId) => runtimeCwdFor(workspaceId, memberId),
+    dispatch: (turn) => scheduler.enqueue(turn),
+    cancelQueued: (turnId) => scheduler.cancel(turnId),
+    emitStatus: opts.emitStatus,
+    emitNotice: opts.emitNotice,
+    now: opts.now,
+    newId: opts.newId,
+    onWarn: opts.onWarn
+  })
+
   const runner = createTurnRunner({
     store: {
       turn: {
         get: (id) => store.repos.turn.get(id),
         setPid: (id, pid) => store.repos.turn.setPid(id, pid)
       },
-      message: { get: (id) => store.repos.message.get(id) },
+      message: {
+        get: (id) => store.repos.message.get(id),
+        listRecentBySession: (sessionId, limit) =>
+          store.repos.message.listRecentBySession(sessionId, limit),
+        listByTurn: (turnId) => store.repos.message.listByTurn(turnId),
+        listEventsByKind: (messageId, kind) => store.repos.message.listEventsByKind(messageId, kind)
+      },
       session: { get: (id) => store.repos.session.get(id) },
       member: {
         get: (id) => store.repos.member.get(id),
@@ -175,10 +281,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     pidOf: (turnId) => opts.children.handleOf(turnId)?.pid ?? null,
     scratchPathOf: (workspace) => spacePaths(opts.workspaceRoot, workspace.dirName).scratch,
+    // ★ 装配要读人设 / 职责描述。**这里是「读文件」这件事在编排层的唯一所有者** ——
+    // `domain/` 那一侧只见到一个函数值，不 import `infra/text-file.ts`（§4.5a 规则一）。
+    textReader: readTextFile,
     now: opts.now,
     newId: opts.newId,
     onWarn: opts.onWarn,
-    ...(opts.maxBudgetUsd !== undefined ? { maxBudgetUsd: opts.maxBudgetUsd } : {})
+    ...(opts.maxBudgetUsd !== undefined ? { maxBudgetUsd: opts.maxBudgetUsd } : {}),
+    ...(opts.historyLimit !== undefined ? { historyLimit: opts.historyLimit } : {}),
+    ...(opts.onContextBuilt !== undefined ? { onContextBuilt: opts.onContextBuilt } : {}),
+    // ★ `@` 扇出：一轮的收尾交给它（**在 `batcher.endTurn` 之后**，见那个选项的说明）。
+    onTurnFinished: (turn, info) => fanout.onTurnFinished(turn, info)
   })
 
   const scheduler: Scheduler = createScheduler({
@@ -236,19 +349,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     batcher,
     epoch: batcher.epoch,
 
-    cwdFor(workspaceId, memberId): CwdDecision {
-      const workspace = store.repos.workspace.get(workspaceId)
-      if (!workspace) throw new Error(`空间 ${workspaceId} 不存在，算不出 cwd`)
-      return resolveTurnCwd({
-        memberPrimaryProjectId: store.repos.member.primaryProjectId(memberId),
-        workspaceActiveProjectId: workspace.activeProjectId,
-        projects: store.repos.project.listByWorkspace(workspaceId),
-        scratchPath: spacePaths(opts.workspaceRoot, workspace.dirName).scratch
-      })
-    },
+    cwdFor: runtimeCwdFor,
 
     dispatch: (turn) => scheduler.enqueue(turn),
     cancelQueued: (turnId) => scheduler.cancel(turnId),
+    fanoutUserMentions: (input) => fanout.dispatchUserMentions(input),
     emitStatus: opts.emitStatus,
     resume: (sessionId, epoch, fromSeq) => batcher.resume(sessionId, epoch, fromSeq),
     state: () => scheduler.state(),

@@ -1,0 +1,65 @@
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/679aa63b-86d6-43e1-84f2-662d18a5b761
+[runtime:fanout:mention-deduped] 「Juno」手上已经排着同样内容的一轮（还没开始跑），这次没有重复派 {
+  turnId: null,
+  level: 'info',
+  detail: { memberId: 'f7455321-d9b0-416c-8b0f-d5da6a6077ae' }
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '7d3ec78e-b37f-43be-900f-dc45e8d4bd39', sample: undefined }
+[runtime:fanout:mention-self] 「Nyx」@ 了它自己，已跳过（那会是一条自己派给自己的链） {
+  turnId: '7d3ec78e-b37f-43be-900f-dc45e8d4bd39',
+  level: 'warn',
+  detail: { memberId: '40168e30-34c5-43eb-a148-00f53389d8fb' }
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'a12f73c3-5349-4a80-bcef-ed87667efbe5', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '855a76c3-9c13-4928-a22f-5608e026001f', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '58606cc5-a659-45b0-939c-666e2ed65652', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'b0e446ee-6193-4c25-94d5-a97cd9cf0dd3', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '95e8e6e3-5ad1-4911-982b-fb01e2b1bff4', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'e3cebd79-4244-4ebc-80e1-170a73bde510', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '2f68f70c-819f-4476-9020-1d375d737099', sample: undefined }
+[runtime:fanout:ping-pong-warn] 这条协作链已经连续几跳没有任何实际动作（只有来回发言）。再往后仍然如此的话，它会被自动终止 {
+  turnId: '2f68f70c-819f-4476-9020-1d375d737099',
+  emptyHops: 2,
+  chain: [
+    {
+      turnId: 'e3cebd79-4244-4ebc-80e1-170a73bde510',
+      hopDepth: 0,
+      hadWork: false
+    },
+    {
+      turnId: '2f68f70c-819f-4476-9020-1d375d737099',
+      hopDepth: 1,
+      hadWork: false
+    }
+  ]
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'fd4eead8-a621-4195-b359-ca128ec5c7cf', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '2b11632c-4ec5-40ca-817f-14c68e1bd4ed', sample: undefined }
+[runtime:fanout:ping-pong-terminate] 这条协作链连续几跳都没有任何实际动作（既没有工具调用，也没有文件改动），本轮之后不再往下派发 {
+  turnId: '2b11632c-4ec5-40ca-817f-14c68e1bd4ed',
+  emptyHops: 4,
+  chain: [
+    {
+      turnId: 'e3cebd79-4244-4ebc-80e1-170a73bde510',
+      hopDepth: 0,
+      hadWork: false
+    },
+    {
+      turnId: '2f68f70c-819f-4476-9020-1d375d737099',
+      hopDepth: 1,
+      hadWork: false
+    },
+    {
+      turnId: 'fd4eead8-a621-4195-b359-ca128ec5c7cf',
+      hopDepth: 2,
+      hadWork: false
+    },
+    {
+      turnId: '2b11632c-4ec5-40ca-817f-14c68e1bd4ed',
+      hopDepth: 3,
+      hadWork: false
+    }
+  ],
+  cancelled: []
+}

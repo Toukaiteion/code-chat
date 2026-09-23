@@ -1,6 +1,4 @@
-import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { readTextFile } from '../../infra/text-file.ts'
 import { AppError } from '../errors.ts'
 
 /**
@@ -17,6 +15,15 @@ import { AppError } from '../errors.ts'
  *
  * 放在 handlers 层而不是 `infra/`：它要抛 `AppError`（好让信封里带上「哪个文件读不了」），
  * 而 `AppError` 属于 ipc 层。`infra/` 保持不认识上层的错误语义。
+ *
+ * ## ★ M7a：读文件的那一半搬到了 `infra/text-file.ts`
+ *
+ * 原先本函数自己 `readFile`。M7a 的上下文装配也需要读文件（人设、职责描述），
+ * 而它**不能抛** —— 于是「读一个文件」这个动作会变成两个实现、两套失败语义，
+ * 正是 §4.5a 规则一禁的形状。现在底层只有 `readTextFile()` 一处，
+ * 本函数退化成两个职责：**把 `reason` 映射回 `AppError`**、**只保留 hash**。
+ *
+ * 错误码与消息**逐字保持不变**（它们已经出现在用户看得见的信封里）。
  */
 
 /**
@@ -28,22 +35,19 @@ export async function readHashedFile(
   what: string,
   path: string
 ): Promise<{ path: string; hash: string }> {
-  const abs = resolve(path)
-
-  let bytes: Buffer
-  try {
-    bytes = await readFile(abs)
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
+  const res = await readTextFile(path)
+  if (!res.ok) {
     // EISDIR 单独说：用户多半是选错了，选了个目录。给一句能被照做的提示。
-    if (code === 'EISDIR') {
-      throw new AppError('E_INVALID_PAYLOAD', `${what}是一个目录，不是文件：${abs}`, { path: abs })
+    if (res.code === 'EISDIR') {
+      throw new AppError('E_INVALID_PAYLOAD', `${what}是一个目录，不是文件：${res.path}`, {
+        path: res.path
+      })
     }
-    throw new AppError('E_NOT_FOUND', `${what}读不了（${code ?? '未知原因'}）：${abs}`, {
-      path: abs,
-      code: code ?? null
+    throw new AppError('E_NOT_FOUND', `${what}读不了（${res.code ?? '未知原因'}）：${res.path}`, {
+      path: res.path,
+      code: res.code
     })
   }
 
-  return { path: abs, hash: createHash('sha256').update(bytes).digest('hex') }
+  return { path: res.path, hash: res.hash }
 }

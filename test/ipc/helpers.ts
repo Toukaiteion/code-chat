@@ -328,6 +328,8 @@ function buildRuntime(
     emitBatch: (batch) => sink('stream:batch', batch),
     emitUnread: (payload) => sink('workspace:unread', payload),
     emitStatus: (payload) => sink('stream:status', payload),
+    // 与 `emitStatus` 同形：熔断的可见警告也要能从台子上看见（§4.5b 的「UI 提示」）。
+    emitNotice: (notice) => sink('app:notice', notice),
     now: () => NOW,
     newId: () => `rt-${++rtIds}`,
     onWarn: () => {},

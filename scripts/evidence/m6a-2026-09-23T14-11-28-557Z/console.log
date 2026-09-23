@@ -1,0 +1,16 @@
+
+──── M6a 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+
+──── 启动 A · 装配 + 场景 1（一次真实对话：Read + Edit） ──────────────────────────────────
+  应用 A 起来了：pid=13444
+  库转储 db-A-setup.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=0 message=0 message_event=0
+  干跑探针        {"api":"function","on":"function","hooked":true,"path":"/G:/project/code-chat/out/renderer/index.html"}
+  A 被硬杀（pid=13444）
+
+──── 干跑结束（**没有发起任何轮次，没花钱**） ────────────────────────────────────────────────
+  地基这一层：构建产物起得来、CDP 连得上、preload 桥在构建版里可用、装配七次 IPC 全过。
+  下一句才是真机：npm run walk:m6a（真花钱）。
+  干跑干净。

@@ -1,6 +1,7 @@
 import type { HandlerContext, Registry } from '../registry.ts'
 import { AppError, NotFoundError } from '../errors.ts'
 import { DEFAULT_MESSAGE_LIMIT } from '../../../shared/ipc/schemas.ts'
+import { mentionProblemOf, USER_INITIATED_HOP_DEPTH } from '../../domain/mention-service.ts'
 
 export function registerTurn(r: Registry, ctx: HandlerContext): void {
   const repos = ctx.store.repos
@@ -45,6 +46,32 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
     const session = repos.session.getByMember(memberId)
     if (!session) throw new NotFoundError('会话', memberId)
 
+    /**
+     * ★ **用户 `@` 的校验**（§5.1 的跳 4）：存在 / 属于本空间 / `enabled` / 不是发送者自己。
+     *
+     * 判据的实现**只有一份**（`mentionProblemOf`，agent 回复那条路也走它），
+     * 但**失败语义刻意不同**：这里是 `E_INVALID_PAYLOAD`，整条消息发不出去；
+     * 而 agent 回复里 @ 到一个停用的成员只会丢掉那一条 + 记一条 note。
+     *
+     * 为什么这里必须**硬失败**而不是静默丢掉：用户明确点了那个人，界面上也把
+     * 那个 chip 画出来了 —— 悄悄不派，就是「界面上有、实际什么都不会发生」，
+     * 正是 §4.3a 拒绝的那类谎。让他当场改，比让他等一个永远不来的回答好。
+     */
+    const wanted = mentions ?? []
+    if (wanted.length > 0) {
+      const members = repos.member.listByWorkspace(workspaceId)
+      for (const m of wanted) {
+        const problem = mentionProblemOf({ memberId: m.memberId, selfMemberId: memberId, members })
+        // 「不在本空间」也算不存在 —— 对用户来说两者是同一件事（他点的那个人没了）。
+        if (problem) {
+          throw new AppError('E_INVALID_PAYLOAD', `@ 的目标无效：${problem.message}`, {
+            memberId: m.memberId,
+            problem: problem.tag
+          })
+        }
+      }
+    }
+
     const cwd = ctx.runtime.cwdFor(workspaceId, memberId).cwd
     const messageId = ctx.newId()
     const turnId = ctx.newId()
@@ -58,7 +85,7 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
         role: 'user',
         authorMemberId: memberId,
         contentText: text,
-        mentions: mentions ?? [],
+        mentions: wanted,
         now
       })
       return repos.turn.create({
@@ -67,13 +94,28 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
         workspaceId,
         triggerMessageId: messageId,
         cwd,
-        // 用户直接发起 = 0。由 `@` 触发的跳数是 M7 的事（§3.3）。
-        hopDepth: 0,
+        /**
+         * ★ **用户直接发起 = 0**（§3.3），这个 0 不是「默认值」而是一个语义：
+         * `hop_depth === 0` 当且仅当这一轮完全由用户发起 ⇒ 它是链的**打断点**
+         * （§5.2：用户插一句话就开了一条新链，上一段空转不会被算进这一段）。
+         * 而由 `@` 派发出去的那一轮 = 派发方 + 1（`hopDepthOf`，在 `fanout` 里）。
+         */
+        hopDepth: USER_INITIATED_HOP_DEPTH,
         now
       })
     })
 
     ctx.runtime.dispatch(turn)
+    // ★ 用户消息里 `@` 的那些人：**事务提交之后**才派（扇出会立刻回库里读会话与成员）。
+    //   它最终也走 `runtime.dispatch`，不是第二个派发入口。
+    if (wanted.length > 0) {
+      ctx.runtime.fanoutUserMentions({
+        workspaceId,
+        authorMemberId: memberId,
+        text,
+        mentions: wanted
+      })
+    }
     return { turnId: turn.id }
   })
 

@@ -1,0 +1,4 @@
+
+[main] 数据库已就绪：C:\Users\RedMoon\AppData\Local\Temp\cc-m7a\userdata\code-chat.db（schema v2）
+[ctx] {"turnId":"7e57a96c-6860-4785-a052-fc7299c9e2b6","shape":{"messageCount":2,"contentChars":4946,"systemPromptChars":267,"historyTotal":1,"historyIncluded":1,"historySuppressed":0,"historyExcluded":0,"compactedThroughSeq":0,"projectFiles":2,"projectFileBytes":11295,"suppressedAutoInjected":2,"personaBytes":131,"roleDescBytes":null}}
+[ctx] {"turnId":"e4a25710-c8c2-42b2-af51-15457e07963f","shape":{"messageCount":4,"contentChars":5207,"systemPromptChars":267,"historyTotal":3,"historyIncluded":3,"historySuppressed":0,"historyExcluded":0,"compactedThroughSeq":0,"projectFiles":2,"projectFileBytes":11295,"suppressedAutoInjected":2,"personaBytes":131,"roleDescBytes":null}}

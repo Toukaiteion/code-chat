@@ -1,0 +1,50 @@
+
+──── M7b 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m7b
+  标记后缀        zah8
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+  两个空间        Sable（4 人，测采集/去重/cc/闸门）· Rill（2 人，测乒乓链）
+
+──── 启动 A · 夹具 ─────────────────────────────────────────────────────────────
+  应用 A 起来了：pid=17036
+  库转储 db-A-setup.json：workspace=2 project=2 actor=6 workspace_member=6 member_project=6 session=6 turn=0 message=0 message_event=0
+  渲染进程重载完成，夹具已在界面上
+  组合根接线      createFanout=true fanoutUserMentions=true onTurnFinished=true（三处少一处，「@ 派发」整个功能就是死的）
+  干跑探针（概览）  {"api":"function","on":"function","hooked":true,"header":"Sable","speaker":"+ 添加"}
+  干跑探针（对话）  {"textarea":true,"send":27}
+  受控输入       typed=typed，发送按钮 disabled=false（应为 false）
+  @ 采集         候选 → chip → 切 cc → 切回来 → 未选中提示（全部在点发送之前）
+  页面内辅助函数 跑了 10 个（结果见归档里的 dry.helper.*）
+  A 被硬杀（pid=17036）
+
+──── 干跑结束（**没有发起任何轮次，没花钱**） ────────────────────────────────────────────────
+  地基这一层：构建产物起得来、CDP 连得上、preload 桥在构建版里可用、夹具走 IPC 全过、
+  对话视图打得开、输入区与发送按钮都在、受控输入通、扇出三处接线都在、`@` 采集全流程通。
+  ⚠️ **没测到**：派发出去之后的一切（转述消息、跳数、去重、三条熔断）—— 那些要真轮次。
+  下一句才是真机：npm run walk:m7b（真花钱，≈10 轮）。
+
+──── 干跑：只判地基（零成本，一个轮次都没发） ──────────────────────────────────────────────────
+  ✅ preload 桥在**构建产物**里可用（invoke=function on=function）—— dev 能跑不等于构建版能跑，走查跑的是构建版
+  ✅ 渲染进程重载之后桥又回来了（重载是夹具变成界面可见的唯一手段）
+  ✅ 推送钩子装上了（stream:batch / stream:status / workspace:unread / app:notice）
+  ✅ 在左栏点得中空间（装配出来的空间在界面上真的存在）
+  ✅ 顶栏渲染出来了、而且显示的是被选中的那个空间的名字：Sable
+  ✅ 点「对话」真的打开了对话视图、输入区在里面（textarea=true）
+  ✅ 发送按钮在（页面上共 27 个 button）
+  ✅ 受控输入：写进 textarea = typed，发送按钮因此变为可点（disabled=false） —— disabled 还是 true 就说明 React 没收到 onChange，点了发送也不会有任何事发生
+  ✅ 扇出的三处接线都在（createFanout=true fanoutUserMentions=true onTurnFinished=true）—— **静态核对**：它不证明判决对，只证明没忘了接（G:\project\code-chat\src\main\process\runtime.ts 等三份）
+
+──── 干跑 · Composer 的 @ 采集（零成本，也是真机里那一段的重放） ─────────────────────────────────
+  ✅ ★ 打 `@Ny` 弹出候选浮层、里面有 Nyx、**没有发言者自己**（Atlas）—— 实得 open=true names=["Nyx"]
+  ✅ 从候选里选中 ⇒ 正文里出现 chip（实得 ["@Nyx"]）—— ★ 这一步是**离散的选中动作**，`mentions` 从这一刻起才是结构化的（§3.1 禁的是从文本里猜）
+  ✅ ★ 选中把半截 `@Ny` 换成了完整人名 + 一个空格（实得 "@Nyx "）—— 正文里留的是**用户看到的那句话**，而 mentions 是另一份结构化的事实
+  ✅ chip 点一下切成「抄送」、再点一下切回来（实得 ["@Nyx（抄送）"] → ["@Nyx"]）—— `kind` 的开关就在这里，而 `cc` 的语义**必须实现**，否则就是「界面上标了 cc、实际什么都没发生」
+  ✅ ★ 手打一个没被选中的 `@` ⇒ 正文下方出现那行提示（`strayHint`）—— 「我 @ 了他但他没收到」这条静默失败，比多一行提示贵得多
+  ✅ 采集五步都点到了（pick=clicked toCc=clicked toTo=clicked）
+  ✅ 页面内辅助函数全跑通（10/10 个）；它们在真机上抛一次就会让采集在**已经花过钱之后**中断
+  ⚠️ ⚠️ **干跑测不到**：派发出去之后的一切（转述消息、跳数记账、去重、三条熔断）—— 它们都要真轮次才有内容，`report()` 把它们当第一等判据
+
+──── 干跑结束 ──────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m7b-2026-09-23T17-47-58-395Z
+  结论     地基干净，可以花真钱了（npm run walk:m7b）（另有 1 条「无法判定」）

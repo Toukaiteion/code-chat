@@ -1,0 +1,321 @@
+{
+  "workspace": [
+    {
+      "id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "name": "Sable",
+      "active_project_id": null,
+      "created_at": 1790186036500,
+      "updated_at": 1790186036500,
+      "archived_at": null,
+      "dir_name": "Sable"
+    },
+    {
+      "id": "e51070bd-953a-4222-a148-a2071d4134a3",
+      "name": "Rill",
+      "active_project_id": null,
+      "created_at": 1790186036535,
+      "updated_at": 1790186036535,
+      "archived_at": null,
+      "dir_name": "Rill"
+    }
+  ],
+  "project": [
+    {
+      "id": "2aca1c52-a991-4187-8535-b08ec2506540",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790186036507,
+      "last_opened_at": null
+    },
+    {
+      "id": "a7da0578-3a66-4261-b29b-5293308c4aeb",
+      "workspace_id": "e51070bd-953a-4222-a148-a2071d4134a3",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790186036539,
+      "last_opened_at": null
+    }
+  ],
+  "actor": [
+    {
+      "id": "71b39fdc-80a3-4a6b-9ea1-65df57f7286f",
+      "name": "Sable-Atlas",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\persona-plain.md",
+      "persona_hash": "247fde4389590202def22a984e3efc3a7d9dc52dd303917061597431b5a69e0c",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790186036510,
+      "updated_at": 1790186036510
+    },
+    {
+      "id": "3c049e7a-ac41-4c24-8437-7f4556c67965",
+      "name": "Sable-Nyx",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\persona-plain.md",
+      "persona_hash": "247fde4389590202def22a984e3efc3a7d9dc52dd303917061597431b5a69e0c",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790186036520,
+      "updated_at": 1790186036520
+    },
+    {
+      "id": "2584df13-0897-4f39-a453-99d0980e8e03",
+      "name": "Sable-Echo",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\persona-plain.md",
+      "persona_hash": "247fde4389590202def22a984e3efc3a7d9dc52dd303917061597431b5a69e0c",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790186036524,
+      "updated_at": 1790186036524
+    },
+    {
+      "id": "269a1112-d1af-4bc2-a11a-ec8570ab4e6d",
+      "name": "Sable-Juno",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\persona-plain.md",
+      "persona_hash": "247fde4389590202def22a984e3efc3a7d9dc52dd303917061597431b5a69e0c",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790186036529,
+      "updated_at": 1790186036529
+    },
+    {
+      "id": "710204b8-745b-433e-ae7a-1bc5920db2c5",
+      "name": "Rill-Vex",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\persona-rally.md",
+      "persona_hash": "ab6480274063f4f1c94e12f851462fcde98e6b0a9fb45670bdcd35c419aa1401",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790186036540,
+      "updated_at": 1790186036540
+    },
+    {
+      "id": "e8bed80e-53af-49dc-8d28-5c895663b57d",
+      "name": "Rill-Wisp",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7b\\persona-rally.md",
+      "persona_hash": "ab6480274063f4f1c94e12f851462fcde98e6b0a9fb45670bdcd35c419aa1401",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790186036544,
+      "updated_at": 1790186036544
+    }
+  ],
+  "workspace_member": [
+    {
+      "id": "a87f32cd-16f1-4c72-826a-daae334f873a",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "actor_id": "71b39fdc-80a3-4a6b-9ea1-65df57f7286f",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790186036512,
+      "updated_at": 1790186036512
+    },
+    {
+      "id": "c10bb8c5-096c-4fb2-bbac-ba3c6b73c738",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "actor_id": "3c049e7a-ac41-4c24-8437-7f4556c67965",
+      "display_name": "Nyx",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790186036521,
+      "updated_at": 1790186036521
+    },
+    {
+      "id": "22bb1329-6a05-40d9-a279-1aa941e78ba3",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "actor_id": "2584df13-0897-4f39-a453-99d0980e8e03",
+      "display_name": "Echo",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790186036525,
+      "updated_at": 1790186036525
+    },
+    {
+      "id": "874f0639-fe9f-44d2-84b1-edbfc190be71",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "actor_id": "269a1112-d1af-4bc2-a11a-ec8570ab4e6d",
+      "display_name": "Juno",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790186036530,
+      "updated_at": 1790186036530
+    },
+    {
+      "id": "d194bdc4-9b98-4c7a-a01d-0c0e275c16f7",
+      "workspace_id": "e51070bd-953a-4222-a148-a2071d4134a3",
+      "actor_id": "710204b8-745b-433e-ae7a-1bc5920db2c5",
+      "display_name": "Vex",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790186036541,
+      "updated_at": 1790186036541
+    },
+    {
+      "id": "93dafa6b-38fa-4da2-af26-9429129ff1ee",
+      "workspace_id": "e51070bd-953a-4222-a148-a2071d4134a3",
+      "actor_id": "e8bed80e-53af-49dc-8d28-5c895663b57d",
+      "display_name": "Wisp",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790186036545,
+      "updated_at": 1790186036545
+    }
+  ],
+  "member_project": [
+    {
+      "member_id": "a87f32cd-16f1-4c72-826a-daae334f873a",
+      "project_id": "2aca1c52-a991-4187-8535-b08ec2506540",
+      "is_primary": 1,
+      "created_at": 1790186036515
+    },
+    {
+      "member_id": "c10bb8c5-096c-4fb2-bbac-ba3c6b73c738",
+      "project_id": "2aca1c52-a991-4187-8535-b08ec2506540",
+      "is_primary": 1,
+      "created_at": 1790186036522
+    },
+    {
+      "member_id": "22bb1329-6a05-40d9-a279-1aa941e78ba3",
+      "project_id": "2aca1c52-a991-4187-8535-b08ec2506540",
+      "is_primary": 1,
+      "created_at": 1790186036526
+    },
+    {
+      "member_id": "874f0639-fe9f-44d2-84b1-edbfc190be71",
+      "project_id": "2aca1c52-a991-4187-8535-b08ec2506540",
+      "is_primary": 1,
+      "created_at": 1790186036532
+    },
+    {
+      "member_id": "d194bdc4-9b98-4c7a-a01d-0c0e275c16f7",
+      "project_id": "a7da0578-3a66-4261-b29b-5293308c4aeb",
+      "is_primary": 1,
+      "created_at": 1790186036542
+    },
+    {
+      "member_id": "93dafa6b-38fa-4da2-af26-9429129ff1ee",
+      "project_id": "a7da0578-3a66-4261-b29b-5293308c4aeb",
+      "is_primary": 1,
+      "created_at": 1790186036547
+    }
+  ],
+  "session": [
+    {
+      "id": "46286bc7-73c9-4ac0-855f-b0285bae9f1a",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "member_id": "a87f32cd-16f1-4c72-826a-daae334f873a",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790186036512,
+      "last_active_at": null
+    },
+    {
+      "id": "c5731e5a-28c3-4ecf-8e7f-84c4910f268b",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "member_id": "c10bb8c5-096c-4fb2-bbac-ba3c6b73c738",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790186036521,
+      "last_active_at": null
+    },
+    {
+      "id": "a583615c-49ab-4e5e-9738-fd3a466eb0d1",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "member_id": "22bb1329-6a05-40d9-a279-1aa941e78ba3",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790186036525,
+      "last_active_at": null
+    },
+    {
+      "id": "7edd9d8b-04cb-4931-840b-4041e7baaf5e",
+      "workspace_id": "66b828f1-31b5-44b4-bdf4-8a9878d43c1b",
+      "member_id": "874f0639-fe9f-44d2-84b1-edbfc190be71",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790186036530,
+      "last_active_at": null
+    },
+    {
+      "id": "d6f7b45c-c2cd-4e3e-8c43-c1e87070dcbe",
+      "workspace_id": "e51070bd-953a-4222-a148-a2071d4134a3",
+      "member_id": "d194bdc4-9b98-4c7a-a01d-0c0e275c16f7",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790186036541,
+      "last_active_at": null
+    },
+    {
+      "id": "791a11cb-d0fa-46b4-acce-4a315bab9dda",
+      "workspace_id": "e51070bd-953a-4222-a148-a2071d4134a3",
+      "member_id": "93dafa6b-38fa-4da2-af26-9429129ff1ee",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790186036545,
+      "last_active_at": null
+    }
+  ],
+  "turn": [],
+  "message": [],
+  "message_event": []
+}

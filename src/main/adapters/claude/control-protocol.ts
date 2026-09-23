@@ -14,22 +14,35 @@ import type { Writable } from 'node:stream'
  * 所以 `control_response` 在 M5 里只做一件事：让「CLI 至少听见了」这件事可被观测。
  * 中断阶梯的推进完全靠 `child-registry` 的等待与超时。
  *
- * ## M5 的一处**明知故犯**，留档在此
+ * ## M5 的一处**明知故犯** —— M7a 已收口，结论是「那不是故犯，那就是对的」
  *
- * `TurnContext.messages` 是**真正的消息数组**（§4.6 的前提）。但 M5 往 stdin 只写
- * **一条** user 消息，由 `renderTurnInput()` 把数组拍平成文本 —— 因为「CLI 的
- * stream-json 输入是否接受多条消息（含 assistant 角色的历史）」**尚未实测**，
- * 而真正的历史装配是 §4.6 / M7 的活。
+ * M5 留档的原话是：`TurnContext.messages` 是「真正的消息数组」（§4.6 的前提），
+ * 但 M5 往 stdin 只写**一条** user 消息（由 `renderTurnInput()` 拍平），
+ * 因为「CLI 的 stream-json 输入是否接受多条消息（含 assistant 角色的历史）」尚未实测 ——
+ * 并特意写明「**M5 这一处是暂时违反 §4.6 的，不是满足它**」。
  *
- * 也就是说：**M5 这一处是暂时违反 §4.6 的，不是满足它。** 记进 §8.9 待办，
- * 别让它安静地变成 M7 的既成事实。
+ * **2026-09-23 的 M7a 探针测了，答案是它满足了、而 §4.6 写错了。**
+ * 两份归档在 `scripts/evidence/m7a-2026-09-23T16-48-08-427Z` 与
+ * `scripts/evidence/m7a-2026-09-23T16-51-08-216Z`，逐字结论见
+ * `domain/context-builder.ts` 的文件头。两条直接相关：
+ *
+ * - **内层 `message.role` 只能是 `'user'`。** 写 `assistant` → 整轮被拒
+ *   （stderr `Error: Expected message role 'user', got 'assistant'`）。
+ * - **多条 user 行 = 多轮，不是一轮的多条。** 3 行 → 2 条 `result`。
+ *
+ * ⇒ 所以 `renderTurnInput()` 的拍平**不是临时实现**，它是这个协议唯一正确的用法；
+ * 「一条 user 消息」也不是将就，是**必须**。
  */
 
 /**
  * 把一轮的输入渲染成 stdin 那一条消息。
  *
- * ⚠️ 见文件头：这是**临时实现**。多轮历史的正确序列化方式（多条消息？单条拼接？
- * 还是走 `--resume`？）需要实测，M7 负责。
+ * ★ M7a 起这是**终局实现**，不是临时实现（见文件头那一段）。调用方**必须**
+ * 把返回值交给 `userMessageLine()` 只写**一行** —— 自己按 `messages` 逐条写
+ * 会变成多轮对话，那是探针实测过的另一件事（`context-builder.ts` 文件头）。
+ *
+ * 它同时是**角色标记在这条链上的唯一所有者**：`【你上一轮的回答】`由它加，
+ * 别的作者标签由装配层加 —— 两边各加一份就会出现两个标记（见 `context-builder` 的 `labelOf`）。
  */
 export function renderTurnInput(messages: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>): string {
   if (messages.length === 0) return ''

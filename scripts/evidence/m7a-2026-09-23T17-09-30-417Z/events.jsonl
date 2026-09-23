@@ -1,0 +1,44 @@
+{"t":1790183370423,"kind":"markers","tag":"markers","nonce":"bpsy","markers":{"cwd":"MK7A-CWD-bpsy","dotclaude":"MK7A-DOTCLAUDE-bpsy","agents":"MK7A-AGENTS-bpsy","rules":"MK7A-RULES-bpsy"},"dir":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj"}
+{"t":1790183370423,"kind":"note","tag":"env","sand":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a","userData":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\userdata","projectDir":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj","model":"deepseek-flash","maxBudgetUsd":0.5,"text":"沙箱 C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a（库 C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\userdata\\code-chat.db，项目 C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj）"}
+{"t":1790183370509,"kind":"launch","label":"A","pid":20808,"args":["--remote-debugging-port=9222","--user-data-dir=C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\userdata","."],"userData":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\userdata","cwd":"G:\\project\\code-chat"}
+{"t":1790183371096,"kind":"note","tag":"cdp","text":"CDP 已连上：file:///G:/project/code-chat/out/renderer/index.html"}
+{"t":1790183371103,"kind":"note","tag":"hooked","text":"hooked"}
+{"t":1790183371812,"kind":"dom","label":"A","tag":"A:startup","text":"还没有工作空间\n\n工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。\n\n新建工作空间\n\n空间目录建在应用数据目录下的 workspaces\\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。\n\n项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁盘上放一份，那份才是可以随空间一起删掉的。"}
+{"t":1790183371819,"kind":"ipc","label":"A","tag":"setup.nova","ch":"workspace:create","req":{"name":"Nova"},"res":{"ok":true,"data":{"id":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","name":"Nova","dirName":"Nova","activeProjectId":null,"createdAt":1790183371815,"updatedAt":1790183371815,"archivedAt":null}},"ms":7}
+{"t":1790183371821,"kind":"ipc","label":"A","tag":"setup.project","ch":"project:addLocal","req":{"workspaceId":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","name":"sandbox","rootPath":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj"},"res":{"ok":true,"data":{"id":"657eb948-11ab-419f-be19-b92f9a0447ce","workspaceId":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","name":"sandbox","rootPath":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj","origin":"local","remoteUrl":null,"defaultBranch":null,"createdAt":1790183371821,"lastOpenedAt":null}},"ms":1}
+{"t":1790183371825,"kind":"ipc","label":"A","tag":"setup.actor","ch":"actor:create","req":{"name":"Atlas","model":"deepseek-flash","personaPath":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\persona.md","effort":"low"},"res":{"ok":true,"data":{"id":"49058103-54b8-4416-a7ec-4aa0fcfd9340","name":"Atlas","avatar":null,"agentKind":"claude","model":"deepseek-flash","effort":"low","personaPath":"C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\persona.md","personaHash":"e2f56f2c5b34d4780dcd19de020e0015523140173694e18009a9c045b5f23f4a","skillsJson":"[]","memoryJson":"[]","createdAt":1790183371824,"updatedAt":1790183371824}},"ms":3}
+{"t":1790183371829,"kind":"ipc","label":"A","tag":"setup.member","ch":"member:create","req":{"workspaceId":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","actorId":"49058103-54b8-4416-a7ec-4aa0fcfd9340","displayName":"Atlas"},"res":{"ok":true,"data":{"id":"c7bd5826-b0d6-4fb4-bd96-f6071b812896","workspaceId":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","actorId":"49058103-54b8-4416-a7ec-4aa0fcfd9340","displayName":"Atlas","roleDescPath":null,"roleDescHash":null,"permissionJson":"{}","isRouter":false,"enabled":true,"createdAt":1790183371827,"updatedAt":1790183371827}},"ms":4}
+{"t":1790183371832,"kind":"ipc","label":"A","tag":"setup.novaVisibility","ch":"member:setVisibility","req":{"memberId":"c7bd5826-b0d6-4fb4-bd96-f6071b812896","projectIds":["657eb948-11ab-419f-be19-b92f9a0447ce"],"primaryProjectId":"657eb948-11ab-419f-be19-b92f9a0447ce"},"res":{"ok":true,"data":[{"memberId":"c7bd5826-b0d6-4fb4-bd96-f6071b812896","projectId":"657eb948-11ab-419f-be19-b92f9a0447ce","isPrimary":true,"createdAt":1790183371831}]},"ms":3}
+{"t":1790183371833,"kind":"ipc","label":"A","tag":"setup.session","ch":"session:getByMember","req":{"memberId":"c7bd5826-b0d6-4fb4-bd96-f6071b812896"},"res":{"ok":true,"data":{"id":"7d732898-0a6c-4f4b-bccc-6bf4d3297579","workspaceId":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","memberId":"c7bd5826-b0d6-4fb4-bd96-f6071b812896","turnCount":0,"lastSeq":0,"compactedThroughSeq":0,"rollingSummary":null,"createdAt":1790183371827,"lastActiveAt":null}},"ms":1}
+{"t":1790183371834,"kind":"ipc","label":"A","tag":"setup.view","ch":"view:setActive","req":{"workspaceId":"58a0af8f-0590-49e3-892e-eb2e6a3d6178","sessionId":"7d732898-0a6c-4f4b-bccc-6bf4d3297579"},"res":{"ok":true,"data":null},"ms":1}
+{"t":1790183371835,"kind":"note","tag":"ids","text":"{\"nova\":{\"id\":\"58a0af8f-0590-49e3-892e-eb2e6a3d6178\",\"name\":\"Nova\",\"dirName\":\"Nova\",\"activeProjectId\":null,\"createdAt\":1790183371815,\"updatedAt\":1790183371815,\"archivedAt\":null},\"memberId\":\"c7bd5826-b0d6-4fb4-bd96-f6071b812896\",\"sessionId\":\"7d732898-0a6c-4f4b-bccc-6bf4d3297579\"}"}
+{"t":1790183371837,"kind":"db","label":"A","phase":"setup","file":"db-A-setup.json","counts":{"workspace":1,"project":1,"actor":1,"workspace_member":1,"member_project":1,"session":1,"turn":0,"message":0,"message_event":0}}
+{"t":1790183371869,"kind":"note","tag":"reload","text":"true"}
+{"t":1790183372033,"kind":"ui","label":"A","tag":"A:pickNova","action":"click","sel":"aside button","sub":"Nova","result":"clicked"}
+{"t":1790183372034,"kind":"note","tag":"A:pickNova","text":"clicked"}
+{"t":1790183372436,"kind":"note","tag":"dry.wiring","text":"wired","file":"G:\\project\\code-chat\\src\\main\\index.ts"}
+{"t":1790183372437,"kind":"note","tag":"dry.before","text":"{\"api\":\"function\",\"on\":\"function\",\"hooked\":true,\"header\":\"Nova\"}"}
+{"t":1790183372445,"kind":"ui","label":"A","tag":"A:dry.view","action":"click","sel":"header button","sub":"对话","result":"clicked"}
+{"t":1790183372447,"kind":"note","tag":"A:dry.pane","text":"true"}
+{"t":1790183372448,"kind":"dom","label":"A","tag":"A:dry.pane","text":"CODE CHAT\n\n工作空间\n\nNova\n⚙\n+ 新建工作空间\n\n项目\n\n+ 添加\nsandbox\n原地引用\nC:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj\n\n成员\n\n+ 添加\nAtlas\nAtlas · 主项目 sandbox\n启用\n角色库\n\nM6b · 流式对话\n\nNova\n当前项目\n未指定\nsandbox\n概览\n对话\n运行中 0/3\n队列 0\n估算 $0.0000\n设置\n这个空间还没有对话。在下面选一个成员，说点什么。\n以\nAtlas\n的身份发言\n发送"}
+{"t":1790183372449,"kind":"note","tag":"dry.after","text":"{\"textarea\":true,\"send\":16}","opened":true}
+{"t":1790183372451,"kind":"ui","label":"A","tag":"A:dry","action":"type","sel":"textarea","chars":11,"result":"typed"}
+{"t":1790183372654,"kind":"note","tag":"dry.type","text":"false","typed":"typed"}
+{"t":1790183372655,"kind":"ui","label":"A","tag":"A:dry","action":"type","sel":"textarea","chars":0,"result":"typed"}
+{"t":1790183372656,"kind":"note","tag":"dry.helper.liveCard","text":"null","ok":true}
+{"t":1790183372657,"kind":"note","tag":"dry.helper.liveText","text":"null","ok":true}
+{"t":1790183372658,"kind":"note","tag":"dry.helper.hasCursor","text":"null","ok":true}
+{"t":1790183372659,"kind":"note","tag":"dry.helper.liveThinking","text":"null","ok":true}
+{"t":1790183372660,"kind":"note","tag":"dry.helper.cards","text":"{\"live\":0,\"done\":0}","ok":true}
+{"t":1790183372661,"kind":"note","tag":"dry.helper.historyRows","text":"[]","ok":true}
+{"t":1790183372663,"kind":"note","tag":"dry.helper.openHistoryThinking","text":"no-card","ok":true}
+{"t":1790183372663,"kind":"note","tag":"dry.helper.openFirstHistoryThinking","text":"{\"i\":-1,\"wasOpen\":false,\"stateAtClick\":\"no-row-with-button\"}","ok":true}
+{"t":1790183372664,"kind":"note","tag":"dry.helper.usageText","text":"估算 $0.0000","ok":true}
+{"t":1790183372665,"kind":"note","tag":"dry.helper.usageTitle","text":"按 Anthropic 官方价目算出的估算值，不是实际账单。\n累计 0 轮：入 0 / 出 0 token。","ok":true}
+{"t":1790183372665,"kind":"note","tag":"dry.helper.headerName","text":"Nova","ok":true}
+{"t":1790183372666,"kind":"note","tag":"dry.helper.count","text":"1","ok":true}
+{"t":1790183372667,"kind":"note","tag":"dry.helper.probeLive","text":"{\"card\":null,\"text\":null,\"cursor\":null,\"thinking\":null}","ok":true}
+{"t":1790183372668,"kind":"note","tag":"dry.helper.watch","text":"watching","ok":true}
+{"t":1790183372669,"kind":"note","tag":"dry.helper.watchStop","text":"{\"live\":0,\"history\":0,\"list\":0,\"chrome\":0,\"byTarget\":{},\"from\":1790183372668,\"ms\":1}","ok":true}
+{"t":1790183372670,"kind":"note","tag":"dry.helper.sync","text":"{\"t\":1790183372670,\"card\":null,\"text\":null,\"pushText\":\"\",\"batches\":0}","ok":true}
+{"t":1790183372889,"kind":"kill","label":"A","pid":20808,"hard":true}

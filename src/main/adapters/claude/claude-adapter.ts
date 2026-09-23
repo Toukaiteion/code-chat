@@ -45,11 +45,18 @@ import { claudeSearchHint, invalidateClaudeCache, resolveClaude } from './cli-lo
  * 一百多行的 Node 脚本。否则这一层几乎没法测：真 CLI 要花钱、要联网、还没法假装
  * 「不回 ACK」或「忽略 SIGTERM」这种专门要测的坏行为。
  *
- * ## 一处明知故犯
+ * ## 那处「明知故犯」已经收口（M7a）
  *
- * `renderTurnInput()` 把消息数组拍平成一条文本（见 `control-protocol.ts` 的文件头）。
- * 这是**暂时违反 §4.6** 的：真正的历史装配是 M7 的活，而「CLI 的 stream-json 输入
- * 收不收多条消息」尚未实测。已记进 §8.9 待办。
+ * 原文写的是：`renderTurnInput()` 把消息数组拍平成一条文本，「这是**暂时违反 §4.6** 的，
+ * 因为『CLI 的 stream-json 输入收不收多条消息』尚未实测」。
+ *
+ * **M7a 测了，结论是：拍平是唯一正确的用法**，§4.6 的那句「必须逐条传递」写错了。
+ * 3 行 stdin → 2 条 `result`（发 N 行 = 发 N 轮），内层 `role` 只能是 `user`
+ * （逐字见 `domain/context-builder.ts` 的文件头与它引的归档）。
+ *
+ * ⇒ 本文件的 `userMessageLine(renderTurnInput(ctx.messages))` **保持不变，且不再是妥协**。
+ * 装配那一半（历史、`<env>`、`<project_context>`、人设）由 `domain/context-builder.ts`
+ * 在 M7a 补上了，`ctx.systemPrompt` 也从空串变成了真的内容。
  */
 
 /** 生产环境为空；测试用 `process.execPath` + 假 CLI 脚本路径顶替真二进制。 */

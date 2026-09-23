@@ -122,6 +122,36 @@ export function messageRepo(db: DatabaseSync) {
     listBySession: db.prepare(
       `SELECT * FROM message WHERE session_id = ? AND deleted_at IS NULL ORDER BY seq ASC LIMIT ?`
     ),
+    /**
+     * 会话的**最近** N 条（M7a 新增）。
+     *
+     * ★ 它与上面那条的区别只有一个 `DESC`，而那个 `DESC` 是**语义**，不是排序偏好：
+     * `listBySession` 取的是**最旧**的 N 条。会话历史要的是最近的 N 条 ——
+     * 拿错了不会报错，只会**安静地少掉最近的那几轮**，而模型因此答非所问。
+     * （同一个错在 `message:list` 的注释里被写成「该会话的最近 N 条」，
+     * 而底下调的是 `listBySession` —— 注释与实现相反，见那个 handler 的说明。）
+     */
+    listRecentBySession: db.prepare(
+      `SELECT * FROM message
+       WHERE session_id = ? AND deleted_at IS NULL
+       ORDER BY seq DESC LIMIT ?`
+    ),
+    /**
+     * ★ **某一轮自己的产物**（M7b 新增）。
+     *
+     * `message.turn_id` 只在 assistant 行上有值 —— 用户那条触发消息是**先**插的
+     * （那时轮次还不存在），轮次反过来用 `trigger_message_id` 指向它（见
+     * `handlers/turn.ts` 的文件头）。所以这一条查出来的**正好是「这一轮产出的东西」**，
+     * 而触发消息要另走 `turn.trigger_message_id`。
+     *
+     * 用途：M7b 的扇出要读「这一轮的回复说了什么」（解析 `<mentions>`）
+     * 与「这一轮干了活没有」（数它的事件）。**无 LIMIT**：一轮的消息条数天然是 1-2 条
+     * （合批器把流式正文折进一条 assistant 行），加 LIMIT 只会让「多了的那条」
+     * 静默消失 —— 而它恰好可能是我们要找的那条。
+     */
+    listByTurn: db.prepare(
+      `SELECT * FROM message WHERE turn_id = ? AND deleted_at IS NULL ORDER BY seq ASC`
+    ),
     softDelete: db.prepare(
       `UPDATE message SET deleted_at = ?, edited_at = ? WHERE id = ? RETURNING *`
     ),
@@ -244,6 +274,17 @@ export function messageRepo(db: DatabaseSync) {
 
     listBySession(sessionId: string, limit: number): Message[] {
       return (s.listBySession.all(sessionId, limit) as Row[]).map(mapMessage)
+    },
+
+    /** 会话的**最近** N 条，**按 seq 升序**返回（DB 里倒序取，这里翻回来给上下文装配用）。 */
+    listRecentBySession(sessionId: string, limit: number): Message[] {
+      const rows = (s.listRecentBySession.all(sessionId, limit) as Row[]).map(mapMessage)
+      return rows.reverse()
+    },
+
+    /** 某一轮自己的产物（按 seq 升序，通常只有一条 assistant 行）。见 `listByTurn` 的 SQL 注释。 */
+    listByTurn(turnId: string): Message[] {
+      return (s.listByTurn.all(turnId) as Row[]).map(mapMessage)
     },
 
     softDelete(id: string, now: number): Message | null {

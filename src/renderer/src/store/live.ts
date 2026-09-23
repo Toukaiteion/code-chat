@@ -32,7 +32,7 @@
  * 历史行就照常显示 —— 那是**正确**的降级：`content_text` 就是这一轮到目前为止的正文。
  */
 import { api } from '../ipc'
-import type { Message, Turn } from '@shared/entities'
+import type { Mention, Message, Turn } from '@shared/entities'
 import type { PushOf, ResOf } from '@shared/ipc/contract'
 import {
   applyFrames,
@@ -156,8 +156,19 @@ export interface LiveSlice {
   applyBatch(batch: StreamBatch): void
   /** 收到一次状态切换。终态时折叠；任何状态都顺带刷一次运行概要。 */
   applyStatus(p: StreamStatus): void
-  /** 发一轮。返回 turnId（失败返回 `null`，错误已进通知）。 */
-  sendTurn(input: { workspaceId: string; memberId: string; text: string }): Promise<string | null>
+  /**
+   * 发一轮。返回 turnId（失败返回 `null`，错误已进通知）。
+   *
+   * ★ `mentions` 是**结构化的**（§3.1：运行时永不解析文本）—— 由 Composer 在
+   * **输入时**采集（`@` 候选浮层），这里只透传。`contentText` 里仍然留着人名的
+   * 字面文本（用户看到的就是他打的那句），两者不互相派生。
+   */
+  sendTurn(input: {
+    workspaceId: string
+    memberId: string
+    text: string
+    mentions?: readonly Mention[]
+  }): Promise<string | null>
   /** 停止一轮（只有排队中的能停，§4.3b）。 */
   stopTurn(turnId: string): Promise<boolean>
 }
@@ -466,9 +477,17 @@ export const createLiveSlice: Slice<LiveSlice> = (set, get) => ({
     })()
   },
 
-  async sendTurn({ workspaceId, memberId, text }) {
+  async sendTurn({ workspaceId, memberId, text, mentions }) {
     try {
-      const { turnId } = await api.turn.send({ workspaceId, memberId, text })
+      const { turnId } = await api.turn.send({
+        workspaceId,
+        memberId,
+        text,
+        // 不带 `mentions` 时**不传这个键**（而不是传 `[]`）：schema 里它是可选的，
+        // 而「用户没 @ 任何人」与「用户 @ 了一个空列表」在主进程那边是同一条路，
+        // 少一个字段就少一个能被填错的地方。
+        ...(mentions && mentions.length > 0 ? { mentions: [...mentions] } : {})
+      })
       // 用户那条消息与新轮次已经在库里了。刷新一次让它们**立刻**出现，
       // 而不是等 `queued` 那条推送绕一圈回来（那条也会来，但会晚一个 IPC 往返）。
       void get().loadMessages(workspaceId)

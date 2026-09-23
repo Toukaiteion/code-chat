@@ -14,11 +14,17 @@ export function registerMessage(r: Registry, ctx: HandlerContext): void {
    *
    * 三者一律**按 seq 升序**返回 —— repository 内部倒序取再翻回来，
    * 调用方拿到的永远是「老 → 新」，可以直接喂给列表渲染。
+   *
+   * ★ M7a 修了一处**注释与实现相反**的错：第 1 条写的是「最近 N 条」，
+   * 而原先调的是 `listBySession()` —— 那个方法取的是**最旧**的 N 条（`ORDER BY seq ASC`）。
+   * 两者只差一个 `DESC`，所以它从 M2 起一直没被发现：不报错、不抛异常，
+   * 只是把一个长会话的**最近几轮换成了最早几轮**。改成 `listRecentBySession()` 之后，
+   * 这段注释才第一次成立。
    */
   r.handle('message:list', ({ workspaceId, sessionId, beforeSeq, limit }) => {
     const n = limit ?? DEFAULT_MESSAGE_LIMIT
 
-    if (sessionId != null) return repos.message.listBySession(sessionId, n)
+    if (sessionId != null) return repos.message.listRecentBySession(sessionId, n)
     if (beforeSeq != null) return repos.message.listBefore(workspaceId, beforeSeq, n)
     return repos.message.listRecent(workspaceId, n)
   })

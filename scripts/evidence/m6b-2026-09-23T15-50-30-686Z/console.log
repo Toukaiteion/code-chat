@@ -1,0 +1,221 @@
+
+──── M6b 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6b
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+
+──── 启动 A · 装配 + 场景 1（走界面发一轮：Read + Edit） ──────────────────────────────────
+  应用 A 起来了：pid=12480
+  库转储 db-A-setup.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=0 message=0 message_event=0
+  渲染进程重载完成，夹具已在界面上
+  概览屏上的成本    估算 $0.0000
+
+──── 场景 1 · 打开对话视图，走界面发一轮 ──────────────────────────────────────────────────
+  走界面发了一轮（输入 127 字，typed=typed）
+  A 的轮次 = 199e1a6a-597f-49d9-9ae6-451f006af216（从 status 推送里认出来的）
+  观察 2s：正文 45 字 / 思考 0 字 / 光标没见 / 结束于 done-frame
+  DOM 改写计数      {"live":13,"history":0,"list":0,"chrome":0,"byTarget":{"live attributes @ span.text-neon-lime":2,"live characterData @ span.text-neon-lime":2,"live childList @ button.hover:bg-panel-2/60.flex":2,"live childList @ div.mb-2.flex":2,"live childList @ article.neon-frame.neon-halo":2,"live characterData @ p.text-ink.text-[13.5px]":1,"live childList @ div.mb-3.flex":1,"live childList @ p.text-ink.text-[13.5px]":1},"from":1790178635390,"ms":2024}
+  终态行在 done 帧之后 386ms 落库（status=done）
+  库转储 db-A-after-s1.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=1 message=2 message_event=9
+
+──── 场景 3 · 切走 → 批次停止 + 未读；切回 → 重放把没见过的那一段补进 DOM ───────────────────────────
+  走界面发了一轮（输入 115 字，typed=typed）
+  A 的轮次 = 16c12e42-ae7a-4a27-bb9d-bdc7c1f516a1（从 status 推送里认出来的）
+  观察 0s：正文 0 字 / 思考 0 字 / 光标没见 / 结束于 terminal-status
+  ⏳ 等不到「轮次 2 的 done 帧」（60000ms）
+  终态行在 done 帧之后 2ms 落库（status=done）
+  库转储 db-A-after-s2.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=2 message=4 message_event=92
+
+──── 硬杀 A（两轮都跑完了） ──────────────────────────────────────────────────────────
+  A 被硬杀（pid=12480）
+  库转储 db-A-after-hard-kill.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=2 message=4 message_event=92
+
+──── 启动 B · 场景 4（硬杀重开：历史完整重放） ──────────────────────────────────────────────
+  应用 B 起来了：pid=35008
+  重开后的卡片      {"live":0,"done":2}
+  展开第 0 条思考面板：no-button
+  库转储 db-B-after-reopen.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=2 message=4 message_event=92
+  重开后的成本      估算 $0.3239
+  workspace:usage   {"turnCount":2,"costUsd":0.323871,"tokensIn":39143,"tokensOut":1276,"turnsWithoutUsage":0}
+
+──── 收尾 · 让 B 正常退出 ─────────────────────────────────────────────────────────
+  B 正常退出 —— 这一条会如实进报告
+
+──── 采集结束 ──────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m6b-2026-09-23T15-50-30-686Z
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6b
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        2
+  驱动方式        **界面**（点击 / 输入 / 切空间）—— 装配走 IPC，夹具不是被测物
+  轮次            1 = 199e1a6a…  2 = 16c12e42…
+
+──── 场景 1 · 走界面发一轮：正文逐字 / 光标 / 思考 / 工具 / diff ──────────────────────────────
+  ✅ 界面驱动：写进输入框 = typed（`mismatch` 意味着 React 没收到 onChange —— 见 HELPERS 第 2 条），点到「发送」= clicked
+  ✅ ★ `stream:status` 推送依次到达：queued → running → done —— 这条通道在 M6a 之前是个**死通道**（有 schema、有白名单、零生产者），M6b 补上了生产者，这是它第一次被走查真的用上（连 turnId 都是从它里面认出来的）
+  ✅ 终态推送到达：done/complete
+  ✅ `stream:batch` 到达 9 批（≥2 才算「流式」而不是一次性）
+  帧的种类        thinking_end×3  tool_start×2  tool_result×2  file_diff×1  text×2  usage×1  done×1
+  ⚠️ ★★ DOM 里那一段正文与帧拼出来的**逐字相同**（DOM （没抓到） 字 / 帧 45 字）
+      观察结束于 done-frame，历时 2s
+  ❌ 流式期间 `.typing-cursor` 出现过 —— 光标就是「还在流」这件事在界面上的表现
+  ⚠️ ★ 光标在 `done` 到达时**撤掉**了（观察正是在「光标撤了、卡片还在」那一刻结束的 —— 那个窗口只有 ~250ms，抓到它本身就是证据）
+  ⚠️ 思考面板点开后**有正文**：0 字 —— （本端点每条 assistant 消息都带 thinking 块；换了端点没有思考也不该算坏，见 §2.4-1）
+  ⚠️ ★ 「可折叠」是**真的被点过**的：思考面板在 `thinking_end` 后自动收起，拿到上面的正文只能靠把它点开（`liveThinking()` 只在合着时点）
+  ✅ 工具时间线**按发生顺序**：Read 排在 6、Edit 排在 68（前者必须在前）
+  ✅ ★ diff 块里就是那次 Edit（一行走、一行来）
+  ✅ diff 里没有行号 —— 位置未知，不许用数字盖住
+  在途卡片全文    ?未知成员✓ReadC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸✓EditC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸a.ts+1 −1-export const x = 1+export const x = 2已把 a.ts 中 `export const x` 的值从 1 改为 2，其余内容未动。入 18933出 195缓存命中 37…（共 258 字）
+  ✅ 流式期间**在途卡片**被改写 13 次（这证明观察真的覆盖了流式过程）
+  ✅ ★★ 流式期间**已落定的卡片零改写**（0 次）、**消息列表本身零改写**（0 次 —— 这一桶连用户气泡那种 `div` 也算进来）
+      必要而非充分：输出相同的重渲染在 DOM 上零痕迹，充分的那一半在 `npm test` 里
+      在途卡片被改写 13 次、界面其余部分（顶栏概要/成本、侧栏未读）0 次 —— 这两处就该刷
+      live attributes @ span.text-neon-lime×2  live characterData @ span.text-neon-lime×2  live childList @ button.hover:bg-panel-2/60.flex×2  live childList @ div.mb-2.flex×2  live childList @ article.neon-frame.neon-halo×2  live characterData @ p.text-ink.text-[13.5px]×1  live childList @ div.mb-3.flex×1  live childList @ p.text-ink.text-[13.5px]×1
+  ✅ 库里的轮次行：status=done terminal_reason=complete
+  ✅ ★ 落库正文与流式帧**逐字同源**（帧 45 字 / 库 45 字）
+  ✅ ★ 终态推送与库里的那一行**说的是同一件事**（推送 done / 库 done）
+  ✅ ★ 磁盘侧：沙箱里的 a.ts 真的被改了 —— 只看 diff 帧是不够的，盘上那个文件才是结果
+
+──── 场景 3 · 切走抑制与切回重放（界面侧） ─────────────────────────────────────────────────
+  ✅ 界面驱动：点到 Vega = clicked，点回 Nova = clicked
+  ✅ ★ 切走期间收到了 Nova 的 `workspace:unread` 1 次（count=1）—— 这是「那段时间帧确实产生了」的正证据
+  ✅ 切走 250ms 之后、切回之前，页面上**再没有**该轮次的批次（实测漏过来 0 批）
+  ✅ ★ 切走期间库里多了 41 条事件行（42 → 83），而同一个窗口里我们收到的该轮次批次是 0 批 —— 收手判据是「terminal」
+  ❌ 切回之后 65 个样本里，界面正文始终**没有**超过收到过的推送（最好的一次 0 对 33，差 -33 字）—— 重放有没有发生，这一条没测到（推送比采样快）
+  ⚠️ 切回之后实时推送 —— **这一条没测到**：这一轮在我们切回来之前就把帧产完了（终态推送已在档，之后再没有任何帧会来）。不是推送坏了，是窗口没排下
+  ✅ 轮次 2 的终态：done/complete —— **切走不影响它跑完**（被抑制的只是推送）
+  切回后的观察      {"textAtDone":0,"best":0}
+
+──── 场景 4 · 硬杀重开：历史完整重放（含思考 / 工具 / diff） ───────────────────────────────────
+  ✅ 重开后**没有在途卡片**（live=0）而**已落定的有 2 张** —— 历史行自己接管了，重放与历史的重叠在界面上不成立
+  ⚠️ 历史行的思考面板**能点开**（`openHistoryThinking(0)` → no-button）
+  ✅ ★ 历史行的思考面板**初值是收起的**（1 条有按钮，没有一个默认展开）—— 历史里没有 `thinking_end` 这个事实，所以「展开过」这件事推不出来
+  ⚠️ ★ 历史里展开出来的思考 0 字 ⊇ 流式期间看到的 ? 字 —— 同源（两者都折自同一批 `message_event` 行；流式那侧受轮询节拍影响只会更短）
+  ✅ 历史行里有工具调用（Read / Edit）—— 重放的不只是正文
+  ✅ 历史行里有 diff（含那一行新增、且没有行号）
+  ✅ ★ 历史行的正文里含**完整的那一段流式正文**（逐字）—— 硬杀没让它少一个字
+  历史第 0 条    AAtlas✓ReadC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸✓EditC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸a.ts+1 −1-export const x = 1+export const x = 2已把 a.ts 中 `export const x` 的值从 1 改为 2，其余内容未动。
+  ✅ `thinking_end` **没有**落库（§8.5a：线上 9 项 / 可持久化 8 项；库里实际出现的类型：done / file_diff / text / thinking / tool_result / tool_start / usage）
+  ✅ 轮次 1 在库里仍是 done（硬杀没把它变成 running/failed）；实测 done
+  ✅ 库里没有 `running`/`queued` 的幽灵行（实测 0 条）
+
+──── 场景 5 · 成本常驻显示（标注「估算」，空缺不许冒充成 0） ───────────────────────────────────────
+  ✅ ★ **概览屏上**就看得见成本：估算 $0.0000 —— §5.4 要的是「常驻」，而常驻的意思就是「不只在对话屏上有」
+  ✅ ★ 口径写在 `title` 里：按 Anthropic 官方价目算出的估算值，不是实际账单。 累计 0 轮：入 0 / 出 0 token。
+  ✅ `title` 里说明了这个数**是按 Anthropic 官方价目算的** —— 那正是它在此端点上不可信的原因
+  ✅ ★ 累计 token 是**真读出来的**（`title` 里带着「入 N / 出 N token」）：按 Anthropic 官方价目算出的估算值，不是实际账单。 累计 0 轮：入 0 / 出 0 token。
+  ✅ 重开之后成本还在：估算 $0.3239（它不随进程消失 —— 那是**库里**的数，不是内存里的）
+  workspace:usage   2 轮 / 入 39143 / 出 1276 / 估算 $0.323871 / 无用量 0 轮
+  ✅ ★ `turnsWithoutUsage=0` 与库里 `cost_usd IS NULL` 的轮次数一致（实测 0）—— 它非零就说明上面那个金额**偏低**，而界面必须在数字旁边把这件事说出来
+  ✅ 没有无用量的轮次，所以界面上**不该**有那个警告 —— 实测没有
+  ✅ 聚合的轮次数 2（≥2：这一趟真跑了两轮）
+  ✅ 第 2 个实例是**正常退出**的（`will-quit` → 合批器冲空 → 关库）
+
+──── 旁证：界面上看到了什么（**不是断言**） ─────────────────────────────────────────────────
+  [A:startup] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁盘上放一份，那份才是可以随空间一起删掉的。
+  [A:overview] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.0000 设置 空间目录 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\userdata\workspaces\Nova 项目落点 C:\U…（共 660 字）
+  [A:s1.pane] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.0000 设置 这个空间还没有对话。在下面选一个成员，说点什么。 以 Atlas 的身份发言 发送
+  [A:after-s1] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.1182 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 599 字）
+  [A:after-s2] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 1730 字）
+  [B:overview] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 空间目录 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\userdata\workspaces\Nova 项目落点 C:\U…（共 660 字）
+  [B:s4.pane] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 1730 字）
+  [B:s4.history] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 1730 字）
+
+──── 结束 ────────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m6b-2026-09-23T15-50-30-686Z
+  结论     2 条不通过（另有 7 条「无法判定」）
+  ⚠️ 端点限定语：全部结论只在**本机默认凭据所指向的端点**下成立，不是 Anthropic 官方行为。
+  ⚠️ 「已落定卡片零改写」是**必要条件**：输出相同的重渲染在 DOM 上零痕迹。
+     充分的那一半在 `npm test`（`MessageList` 从不订阅 `buffers`）。两半合起来才是完整的一句。
+
+──── M6b 走查 · 重放归档（零成本） ────────────────────────────────────────────────────
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6b
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        2
+  驱动方式        **界面**（点击 / 输入 / 切空间）—— 装配走 IPC，夹具不是被测物
+  轮次            1 = 199e1a6a…  2 = 16c12e42…
+
+──── 场景 1 · 走界面发一轮：正文逐字 / 光标 / 思考 / 工具 / diff ──────────────────────────────
+  ✅ 界面驱动：写进输入框 = typed（`mismatch` 意味着 React 没收到 onChange —— 见 HELPERS 第 2 条），点到「发送」= clicked
+  ✅ ★ `stream:status` 推送依次到达：queued → running → done —— 这条通道在 M6a 之前是个**死通道**（有 schema、有白名单、零生产者），M6b 补上了生产者，这是它第一次被走查真的用上（连 turnId 都是从它里面认出来的）
+  ✅ 终态推送到达：done/complete
+  ✅ `stream:batch` 到达 9 批（≥2 才算「流式」而不是一次性）
+  帧的种类        thinking_end×3  tool_start×2  tool_result×2  file_diff×1  text×2  usage×1  done×1
+  ✅ ★★ DOM 里那一段正文与帧拼出来的**逐字相同**（DOM 45 字 / 帧 45 字；取的是观察窗口里最长的那一次（没等到光标））
+      观察结束于 done-frame，历时 2s
+  ❌ 流式期间 `.typing-cursor` 一次都没出现过，而正文是分 2 批流进来的 —— 光标没在工作
+  ⚠️ ★ 光标在 `done` 到达时**撤掉**了（观察正是在「光标撤了、卡片还在」那一刻结束的 —— 那个窗口只有 ~250ms，抓到它本身就是证据）
+  ⚠️ 思考面板点开后**有正文**：0 字 —— （本端点每条 assistant 消息都带 thinking 块；换了端点没有思考也不该算坏，见 §2.4-1）
+  ⚠️ ★ 「可折叠」是**真的被点过**的：思考面板在 `thinking_end` 后自动收起，拿到上面的正文只能靠把它点开（`liveThinking()` 只在合着时点）
+  ✅ 工具时间线**按发生顺序**：Read 排在 6、Edit 排在 68（前者必须在前）
+  ✅ ★ diff 块里就是那次 Edit（一行走、一行来）
+  ✅ diff 里没有行号 —— 位置未知，不许用数字盖住
+  在途卡片全文    ?未知成员✓ReadC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸✓EditC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸a.ts+1 −1-export const x = 1+export const x = 2已把 a.ts 中 `export const x` 的值从 1 改为 2，其余内容未动。入 18933出 195缓存命中 37…（共 258 字）
+  ✅ 流式期间**在途卡片**被改写 13 次（这证明观察真的覆盖了流式过程）
+  ✅ ★★ 流式期间**已落定的卡片零改写**（0 次）、**消息列表本身零改写**（0 次 —— 这一桶连用户气泡那种 `div` 也算进来）
+      必要而非充分：输出相同的重渲染在 DOM 上零痕迹，充分的那一半在 `npm test` 里
+      在途卡片被改写 13 次、界面其余部分（顶栏概要/成本、侧栏未读）0 次 —— 这两处就该刷
+      live attributes @ span.text-neon-lime×2  live characterData @ span.text-neon-lime×2  live childList @ button.hover:bg-panel-2/60.flex×2  live childList @ div.mb-2.flex×2  live childList @ article.neon-frame.neon-halo×2  live characterData @ p.text-ink.text-[13.5px]×1  live childList @ div.mb-3.flex×1  live childList @ p.text-ink.text-[13.5px]×1
+  ✅ 库里的轮次行：status=done terminal_reason=complete
+  ✅ ★ 落库正文与流式帧**逐字同源**（帧 45 字 / 库 45 字）
+  ✅ ★ 终态推送与库里的那一行**说的是同一件事**（推送 done / 库 done）
+  ✅ ★ 磁盘侧：沙箱里的 a.ts 真的被改了 —— 只看 diff 帧是不够的，盘上那个文件才是结果
+
+──── 场景 3 · 切走抑制与切回重放（界面侧） ─────────────────────────────────────────────────
+  ✅ 界面驱动：点到 Vega = clicked，点回 Nova = clicked
+  ✅ ★ 切走期间收到了 Nova 的 `workspace:unread` 1 次（count=1）—— 这是「那段时间帧确实产生了」的正证据
+  ✅ 切走 250ms 之后、切回之前，页面上**再没有**该轮次的批次（实测漏过来 0 批）
+  ✅ ★ 切走期间库里多了 41 条事件行（42 → 83），其中正文 -1 条 —— 而同一个窗口里我们收到的该轮次批次是 0 批 （收手判据是「terminal」：终态先到就早回，正文落库且满了最短时间也回，最多待久了兜底，免得那一轮跑完、缓冲被终态推送丢掉，那个瞬间就再也抢不到了）
+  ❌ 切回之后 65 个样本里（卡片在场 -1 次），界面正文始终**没有**超过收到过的推送（最好的一次 0 对 33，差 -33 字）—— 按「推送只会让正文变长、永远不会让它超出自己」这条不变式，多出来的那段只可能来自重放，而这里一次都没多出来
+  ⚠️ 切回之后实时推送 —— **这一条没测到**：这一轮在我们切回来之前就把帧产完了（终态推送已在档，之后再没有任何帧会来）。不是推送坏了，是窗口没排下
+  ✅ 轮次 2 的终态：done/complete —— **切走不影响它跑完**（被抑制的只是推送）
+  切回后的观察      {"textAtDone":0,"best":0}
+
+──── 场景 4 · 硬杀重开：历史完整重放（含思考 / 工具 / diff） ───────────────────────────────────
+  ✅ 重开后**没有在途卡片**（live=0）而**已落定的有 2 张** —— 历史行自己接管了，重放与历史的重叠在界面上不成立
+  ⚠️ 历史行的思考面板**能点开**（`openHistoryThinking(0)` → no-button）
+  ✅ ★ 历史行的思考面板**初值是收起的**（1 条有按钮，没有一个默认展开）—— 历史里没有 `thinking_end` 这个事实，所以「展开过」这件事推不出来
+  ⚠️ ★ 历史里展开出来的思考 0 字 ⊇ 流式期间看到的 ? 字 —— 同源（两者都折自同一批 `message_event` 行；流式那侧受轮询节拍影响只会更短）
+  ✅ 历史行里有工具调用（Read / Edit）—— 重放的不只是正文
+  ✅ 历史行里有 diff（含那一行新增、且没有行号）
+  ✅ ★ 历史行的正文里含**完整的那一段流式正文**（逐字）—— 硬杀没让它少一个字
+  历史第 0 条    AAtlas✓ReadC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸✓EditC:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj\a.ts▸a.ts+1 −1-export const x = 1+export const x = 2已把 a.ts 中 `export const x` 的值从 1 改为 2，其余内容未动。
+  ✅ `thinking_end` **没有**落库（§8.5a：线上 9 项 / 可持久化 8 项；库里实际出现的类型：done / file_diff / text / thinking / tool_result / tool_start / usage）
+  ✅ 轮次 1 在库里仍是 done（硬杀没把它变成 running/failed）；实测 done
+  ✅ 库里没有 `running`/`queued` 的幽灵行（实测 0 条）
+
+──── 场景 5 · 成本常驻显示（标注「估算」，空缺不许冒充成 0） ───────────────────────────────────────
+  ✅ ★ **概览屏上**就看得见成本：估算 $0.0000 —— §5.4 要的是「常驻」，而常驻的意思就是「不只在对话屏上有」
+  ✅ ★ 口径写在 `title` 里：按 Anthropic 官方价目算出的估算值，不是实际账单。 累计 0 轮：入 0 / 出 0 token。
+  ✅ `title` 里说明了这个数**是按 Anthropic 官方价目算的** —— 那正是它在此端点上不可信的原因
+  ✅ ★ 累计 token 是**真读出来的**（`title` 里带着「入 N / 出 N token」）：按 Anthropic 官方价目算出的估算值，不是实际账单。 累计 0 轮：入 0 / 出 0 token。
+  ✅ 重开之后成本还在：估算 $0.3239（它不随进程消失 —— 那是**库里**的数，不是内存里的）
+  workspace:usage   2 轮 / 入 39143 / 出 1276 / 估算 $0.323871 / 无用量 0 轮
+  ✅ ★ `turnsWithoutUsage=0` 与库里 `cost_usd IS NULL` 的轮次数一致（实测 0）—— 它非零就说明上面那个金额**偏低**，而界面必须在数字旁边把这件事说出来
+  ✅ 没有无用量的轮次，所以界面上**不该**有那个警告 —— 实测没有
+  ✅ 聚合的轮次数 2（≥2：这一趟真跑了两轮）
+  ✅ 第 2 个实例是**正常退出**的（`will-quit` → 合批器冲空 → 关库）
+
+──── 旁证：界面上看到了什么（**不是断言**） ─────────────────────────────────────────────────
+  [A:startup] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁盘上放一份，那份才是可以随空间一起删掉的。
+  [A:overview] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.0000 设置 空间目录 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\userdata\workspaces\Nova 项目落点 C:\U…（共 660 字）
+  [A:s1.pane] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.0000 设置 这个空间还没有对话。在下面选一个成员，说点什么。 以 Atlas 的身份发言 发送
+  [A:after-s1] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.1182 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 599 字）
+  [A:after-s2] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 1730 字）
+  [B:overview] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 空间目录 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\userdata\workspaces\Nova 项目落点 C:\U…（共 660 字）
+  [B:s4.pane] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 1730 字）
+  [B:s4.history] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6b\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M6b · 流式对话 Nova 当前项目 未指定 sandbox 概览 对话 运行中 0/3 队列 0 估算 $0.3239 设置 只做这两件事，不要做别的： 1. 用 Read 工具读当前目录下的 a.ts。 2. 用 Edit 工具把 a.ts 里的 `export const x = 1`…（共 1730 字）
+
+──── 结束 ────────────────────────────────────────────────────────────────────
+  归档目录：scripts/evidence/m6b-2026-09-23T15-50-30-686Z
+  结论     2 条不通过（另有 6 条「无法判定」）
+  ⚠️ 端点限定语：全部结论只在**本机默认凭据所指向的端点**下成立，不是 Anthropic 官方行为。
+  ⚠️ 「已落定卡片零改写」是**必要条件**：输出相同的重渲染在 DOM 上零痕迹。
+     充分的那一半在 `npm test`（`MessageList` 从不订阅 `buffers`）。两半合起来才是完整的一句。

@@ -74,6 +74,19 @@ export function turnRepo(db: DatabaseSync) {
     listRecentByWorkspace: db.prepare(
       `SELECT * FROM turn WHERE workspace_id = ? ORDER BY started_at DESC LIMIT ?`
     ),
+    /**
+     * ★ 本空间最近的 N 个轮次，**按 `queued_at` 倒序取、翻回升序**（M7b 新增）。
+     *
+     * 为什么不能用上面那条：它按 `started_at DESC` 排，而**排队中的轮次 `started_at` 是 NULL**
+     * （`turn:list` 的注释里已经记过这个坑）。M7b 的链判据要的正是「**连排队中的一起**、
+     * 按发起顺序」，按 `started_at` 排会把它们全甩到末尾，链就断在最要紧的那几条上。
+     *
+     * 判据本人（`mention-service.chainOf`）只认 `queued_at` 这个全序：
+     * `queued_at` 是**插入即写**的（`turn.create`），所以它不会像 `started_at` 那样空着。
+     */
+    listRecentByQueuedAt: db.prepare(
+      `SELECT * FROM turn WHERE workspace_id = ? ORDER BY queued_at DESC LIMIT ?`
+    ),
     get: db.prepare(`SELECT * FROM turn WHERE id = ?`),
     insert: db.prepare(
       `INSERT INTO turn
@@ -156,6 +169,12 @@ export function turnRepo(db: DatabaseSync) {
 
     listRecentByWorkspace(workspaceId: string, limit: number): Turn[] {
       return (s.listRecentByWorkspace.all(workspaceId, limit) as Row[]).map(mapTurn)
+    },
+
+    /** 本空间最近的 N 个轮次，**按 `queued_at` 升序**返回（见 SQL 注释：M7b 的链判据用）。 */
+    listRecentByQueuedAt(workspaceId: string, limit: number): Turn[] {
+      const rows = (s.listRecentByQueuedAt.all(workspaceId, limit) as Row[]).map(mapTurn)
+      return rows.reverse()
     },
 
     get(id: string): Turn | null {

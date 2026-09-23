@@ -1,0 +1,50 @@
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/a885aa78-d915-4fc4-a074-7ffda5ed620b
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '253846a4-87f2-4fb6-8d7b-21808ca14c63', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '4d151d03-4c76-46e2-bcc1-ec7601914550', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '14b81a67-f71f-4985-a69d-05cb863cb378', sample: undefined }
+[runtime:fanout:ping-pong-warn] 这条协作链已经连续几跳没有任何实际动作（只有来回发言）。再往后仍然如此的话，它会被自动终止 {
+  turnId: '14b81a67-f71f-4985-a69d-05cb863cb378',
+  emptyHops: 2,
+  chain: [
+    {
+      turnId: '4d151d03-4c76-46e2-bcc1-ec7601914550',
+      hopDepth: 0,
+      hadWork: false
+    },
+    {
+      turnId: '14b81a67-f71f-4985-a69d-05cb863cb378',
+      hopDepth: 1,
+      hadWork: false
+    }
+  ]
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '40624892-42ab-44f6-812e-efbde9ba7b5e', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'e57cdc53-81eb-454d-8cae-5ec474a4ede1', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'a5b1efc2-9188-405c-8e59-4725b0820d65', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '86949c2a-d117-49d0-b415-16d1a472a7d7', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '56b61261-e7bc-4b7c-b6e1-85e750904ba6', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '7a13b21b-8f51-4012-ac31-c590370e13a6', sample: undefined }
+[runtime:fanout:ping-pong-warn] 这条协作链已经连续几跳没有任何实际动作（只有来回发言）。再往后仍然如此的话，它会被自动终止 {
+  turnId: '7a13b21b-8f51-4012-ac31-c590370e13a6',
+  emptyHops: 2,
+  chain: [
+    {
+      turnId: '56b61261-e7bc-4b7c-b6e1-85e750904ba6',
+      hopDepth: 0,
+      hadWork: false
+    },
+    {
+      turnId: '7a13b21b-8f51-4012-ac31-c590370e13a6',
+      hopDepth: 1,
+      hadWork: false
+    }
+  ]
+}
+[runtime:fanout:mention-self] 「Wisp」@ 了它自己，已跳过（那会是一条自己派给自己的链） {
+  turnId: '7a13b21b-8f51-4012-ac31-c590370e13a6',
+  level: 'warn',
+  detail: { memberId: 'e9e96860-3bd2-42fc-aee2-4cebac99d588' }
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'dd1e5fc8-b14b-41b7-8878-6ce90b50a3e3', sample: undefined }
+[runtime:fanout:mentions-malformed] 回复里的 <mentions> 标签不完整，这一轮不派发任何成员 { turnId: 'dd1e5fc8-b14b-41b7-8878-6ce90b50a3e3' }

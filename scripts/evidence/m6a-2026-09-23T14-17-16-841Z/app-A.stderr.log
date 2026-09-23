@@ -1,0 +1,4 @@
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/93a7c756-b55b-4e4d-90cf-c63c7785aa2e
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '0578a2c8-efbe-4dc6-872e-efa9110e3a82', sample: undefined }
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'c634a150-fd89-4ce0-8153-92fe61cc7efd', sample: undefined }

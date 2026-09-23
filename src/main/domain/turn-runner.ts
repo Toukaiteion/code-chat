@@ -8,39 +8,64 @@ import type { TerminalWrite, TurnIdentity } from '../process/event-batcher.ts'
 import type {
   Actor,
   AgentErrorCode,
+  EventKind,
   Message,
+  MessageEvent,
+  Project,
   Session,
   TerminalReason,
   Turn,
   Workspace,
   WorkspaceMember
 } from '../../shared/entities.ts'
-import type { CwdProject } from './turn-cwd.ts'
+import type { ContextShape, HistoryMessage } from './context-builder.ts'
+import type { TextReadResult } from '../infra/text-file.ts'
+import { buildContext } from './context-builder.ts'
+import {
+  parseMentionsBlock,
+  replyTextOf,
+  WORK_EVENT_KINDS,
+  type TurnFinishedInfo
+} from './mention-service.ts'
 import { resolveAddDirs, resolveTurnCwd } from './turn-cwd.ts'
 
 /**
  * 单轮编排 —— 把「库里的一条 `queued` 轮次」变成「一次真实的 agent 调用 + 一串落库的事件」。
  *
- * ## 它的边界：M6a 的 `TurnContext` 是**最小但真实**的一份
+ * ## 它的边界：`TurnContext` 的形状是 M5 锁定的，M7a 填上了上下文那一半
  *
- * `TurnContext` 的**形状**是 M5 锁定的，M6a 只负责填。填进去的东西与不填的东西
- * 一样重要，逐条写在这里，免得 M7 把它们当成「已经有了」：
- *
- * | 字段 | M6a 的来源 |
+ * | 字段 | M7a 的来源 |
  * |---|---|
  * | `cwd` | `turn-cwd.ts` 的三级兜底（主项目 → 空间 active 项目 → `scratch/`） |
  * | `addDirs` | §8.4 的可见性（`member_project`）—— **本函数是可见性模型的第一个真实消费方** |
- * | `messages` | **只有当轮那条用户消息**。不拼历史 —— 那是 M7 的 `context-builder` |
- * | `systemPrompt` | **空串**。`<env>/<summary>/<recent>/<trigger>` 的装配是 M7 |
+ * | `messages` | `context-builder.buildContext()`：prelude（`<env>`+`<project_context>`+`<summary?>`）+ 会话历史 |
+ * | `systemPrompt` | 同一次装配：`<persona>` + `<role?>` + 协作协议 |
  * | `model` / `effort` | `actor.model`（自由文本，§2.4-1）/ `actor.effort` |
  * | `permissionMode` | `member.permissionJson.mode ?? 'bypassPermissions'` |
  * | `maxBudgetUsd` | 常量默认值（`DEFAULT_MAX_BUDGET_USD`），成员覆盖是 M8 |
  *
- * **代价说清楚**：M6a 里同一会话的第二轮**不记得**第一轮。这不是遗漏，
- * 它是 M7 的验收项本身（「第 2 轮能正确引用第 1 轮」）。
- * 另外本函数**不调 `collectProjectContext`**（§8.5c 把它放在首条 user 消息里，
- * 属于上下文装配 = M7）——但 agent 并非全盲：**cwd 里的 `CLAUDE.md` 由 CLI 自己自动注入**
- * （M5 实测），而 `--add-dir` 目录里的那份不会。M6a 只如实记录这条不对称，去重规则是 M7 的。
+ * M6a 那张表里 `messages` / `systemPrompt` 两行**都变了**，各有一处要说清：
+ *
+ * - `messages` 不再是「只有当轮那条用户消息」。★ **但它在 stdin 上仍然只占一行** ——
+ *   适配器把数组拍平成一条写出去。M7a 探针实测：**发 N 行 = 发 N 轮**，不是一轮的 N 条
+ *   （详见 `context-builder.ts` 的文件头，别在这里重述）。
+ * - `systemPrompt` 不再是空串。
+ *
+ * **仍然不做的一件事**：同一会话的历史**没有「最近 N 轮」这个参数** ——
+ * 窗口由压缩水位线（`session.compacted_through_seq`）决定，§4.4 明确否掉了第二个 N。
+ * 但**取数**时有一个必须有的上限（`DEFAULT_HISTORY_LIMIT`）：不设它，一个从未被压缩过
+ * 的长会话会把整张表读进内存。撞上限会记一条 `warn`，**不静默截断** ——
+ * 那是「压缩没跟上」的信号，不是正常状态。
+ *
+ * ## 人设读不到 = 致命 —— **判决在这一层，不在 `context-builder`**
+ *
+ * `context-builder` 只记一条 note。这里读 `shape.personaBytes === null` 决定 `fail()`。
+ * 理由（依据是列级事实，不是口味）：`actor.persona_path` 是 `NOT NULL`，且写入时
+ * （`actor:create` / `actor:setPersona`）已经验证过那个文件存在 —— 所以「读不到」
+ * 意味着**建立之后被删/被改**，是真异常。用一份空人设跑一轮，等于让用户以为
+ * 「Nyx 在干活」而实际是别的东西在干活：那正是本项目最贵的那类错（**看起来正常**）。
+ *
+ * 职责描述读不到**不致命**：`role_desc_path` 可空，NULL 本来就是合法状态。
  *
  * ## 终态映射表**只有一处**（`terminalOf()`）
  *
@@ -59,6 +84,15 @@ export const DEFAULT_MAX_BUDGET_USD = 0.5
 /** 权限模式的默认值。§4.4 逐字：不做交互式确认，agent 直接干活。 */
 export const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
 
+/**
+ * 一次取多少条会话历史。
+ *
+ * ★ **这不是「最近 N 轮」那个 N**（§4.4 否掉了第二个窗口参数），只是**取数上限**。
+ * 真正决定进不进上下文的是压缩水位线，而这个上限要足够宽松，
+ * 宽松到**只有压缩坏了才会撞上它** —— 撞上会 `warn`，因为那说明有东西没在干活。
+ */
+export const DEFAULT_HISTORY_LIMIT = 200
+
 /** 编排一轮需要的**最小**持久化面。 */
 export interface TurnRunnerStore {
   turn: {
@@ -66,7 +100,15 @@ export interface TurnRunnerStore {
     /** spawn 之后补 pid（**与状态翻转是两次写入**，见 `turn-repo.markRunning`）。 */
     setPid(id: string, pid: number): Turn | null
   }
-  message: { get(id: string): Message | null }
+  message: {
+    get(id: string): Message | null
+    /** 会话的**最近** N 条，**按 `seq` 升序**返回（见 `message-repo.listRecentBySession`）。 */
+    listRecentBySession(sessionId: string, limit: number): Message[]
+    /** **这一轮自己的产物**（M7b 的 `<mentions>` 解析与「干过活没有」都要读它）。 */
+    listByTurn(turnId: string): Message[]
+    /** 数某一轮有没有工具调用 / 文件改动（判据见 `mention-service.WORK_EVENT_KINDS`）。 */
+    listEventsByKind(messageId: string, kind: EventKind): MessageEvent[]
+  }
   session: { get(id: string): Session | null }
   member: {
     get(id: string): WorkspaceMember | null
@@ -75,7 +117,12 @@ export interface TurnRunnerStore {
   }
   actor: { get(id: string): Actor | null }
   workspace: { get(id: string): Workspace | null }
-  project: { listByWorkspace(workspaceId: string): CwdProject[] }
+  /**
+   * `Project` 而不是 `CwdProject`：装配要用 `name` 拼 `<env>` 的项目清单，
+   * 而 `CwdProject` 只有 `{id, rootPath}`。`Project` 是它的超集，所以
+   * `resolveTurnCwd` 照样吃得下（结构化子类型）。
+   */
+  project: { listByWorkspace(workspaceId: string): Project[] }
 }
 
 /** 合批器里本函数要用的那几件。刻意窄于 `EventBatcher`，测试可以只给这几件。 */
@@ -109,10 +156,50 @@ export interface TurnRunnerOptions {
   pidOf(turnId: string): number | null
   /** `<空间>/scratch/` 的绝对路径（`spacePaths(root, dirName).scratch`）。 */
   scratchPathOf(workspace: Workspace): string
+  /**
+   * ★ 读一个文本文件（`context-builder` 的两条注入缝之一）。
+   *
+   * **刻意不给默认值**：给了的话单测就会在「读一个人设文件」这件事上
+   * 悄悄走真文件系统，而「第 1 个文件缺失」这种处境就只能靠真造文件来构造。
+   * 生产由 `process/runtime.ts` 递 `infra/text-file.ts` 的 `readTextFile`。
+   *
+   * （另一条缝 `collectProjectContext` 不在这里 —— 它就在 `AgentAdapter` 接口上，
+   * 而 `adapter` 已经是本函数的局部变量。多一条注入只会多一个能对不上的地方。）
+   */
+  textReader(path: string, capBytes?: number): Promise<TextReadResult>
   now(): number
   newId(): string
   onWarn(tag: string, message: string, detail?: unknown): void
   maxBudgetUsd?: number
+  /** 会话历史的**取数**上限，见 `DEFAULT_HISTORY_LIMIT`。 */
+  historyLimit?: number
+  /**
+   * ★ **装配形状的观测缝**（M7a 的走查需要它）。
+   *
+   * 「这一轮实际发出去了什么」此前**没有任何落档处**：装配产物只在内存里，
+   * 走查读 `db-*.json` 看不到它。而走查又不能把提示词全文写进归档
+   * （那里面有用户的项目内容）—— 所以这里**只传 `ContextShape`，永远不传正文**。
+   *
+   * 形状照 `onWarn`：**可选、同步、不返回值**。它是个观察者，不是钩子 ——
+   * 站在它里面改不了这一轮的走向。
+   */
+  onContextBuilt?(turnId: string, shape: ContextShape): void
+  /**
+   * ★ **一轮结束之后的 `@` 扇出**（M7b）。
+   *
+   * 为什么落在这里：`@` 出现在 **agent 的回复里**，所以「这一轮 @ 了谁」只有
+   * 轮次结束时才知道 —— 不能在 `turn:send` 时算。执行（建轮次 / 取消排队 / 落库）
+   * 在 `process/fanout.ts`，本函数只把**事实**递出去。
+   *
+   * ★ **必须在 `batcher.endTurn` 之后调用**（本函数也确实这么调）：`endTurn` 是提交
+   * 终态的那个事务，而扇出要读的正是刚提交的东西（这一轮的回复、它有没有干活）。
+   * 在它之前读，读到的是一份**还没落库**的世界。
+   *
+   * 为什么不在这里直接做：本函数在 `domain/`，而建轮次 / 派发要走 `runtime.dispatch`
+   * 与 `runtime.cancelQueued` 这两个**唯一入口**（§4.5a 规则一）—— 那两个入口只在
+   * `runtime.ts` 的装配里存在。
+   */
+  onTurnFinished?(turn: Turn, info: TurnFinishedInfo): void
 }
 
 export interface TurnRunner {
@@ -172,6 +259,7 @@ export function permissionModeOf(permissionJson: string): string {
 
 export function createTurnRunner(opts: TurnRunnerOptions): TurnRunner {
   const maxBudgetUsd = opts.maxBudgetUsd ?? DEFAULT_MAX_BUDGET_USD
+  const historyLimit = opts.historyLimit ?? DEFAULT_HISTORY_LIMIT
 
   function warn(tag: string, message: string, detail?: unknown): void {
     opts.onWarn(tag, message, detail)
@@ -278,16 +366,111 @@ export function createTurnRunner(opts: TurnRunnerOptions): TurnRunner {
         return
       }
 
-      // ── 4. 上下文：**只有当轮那条用户消息**（见文件头那张表）──
-      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
-      if (turn.triggerMessageId) {
-        const trigger = store.message.get(turn.triggerMessageId)
-        if (trigger?.contentText) messages.push({ role: 'user', content: trigger.contentText })
-      }
-      if (messages.length === 0) {
-        // 理论上不可达（`turn:send` 一定带 triggerMessageId），但**空提示词发出去**
-        // 会让模型对着空气说话、并可能真的改文件 —— 这个代价太大，值得一行守卫。
+      // ── 4. 上下文装配（§4.6 / M7a）──
+      //
+      // ★ **触发行必须先单独判空。** 装配之后提示词**永远非空**（prelude 一定在），
+      // 所以 M6a 那条「空提示词不出门」的守卫不能靠装配结果做 ——
+      // 它得在这里，用触发行本身做。少了它，模型会对着一份「只有环境说明、
+      // 没有请求」的提示词说话，并可能真的去改文件。
+      const trigger = turn.triggerMessageId ? store.message.get(turn.triggerMessageId) : null
+      if (!trigger || !trigger.contentText || trigger.contentText.trim().length === 0) {
+        // 理论上不可达（`turn:send` 一定带 triggerMessageId 且正文非空），但代价太大。
         fail('protocol', '这一轮没有可发送的用户消息，已取消执行')
+        return
+      }
+
+      // 作者名要现查：`message` 表只存 `author_member_id`，而标签需要显示名。
+      // 缓存一下 —— 一段历史里作者通常只有两三个。
+      const nameCache = new Map<string, string | null>()
+      const toHistory = (m: Message): HistoryMessage => {
+        let authorName: string | null = null
+        if (m.authorMemberId !== null) {
+          if (!nameCache.has(m.authorMemberId)) {
+            nameCache.set(m.authorMemberId, store.member.get(m.authorMemberId)?.displayName ?? null)
+          }
+          authorName = nameCache.get(m.authorMemberId) ?? null
+        }
+        return {
+          id: m.id,
+          seq: m.seq,
+          role: m.role,
+          authorMemberId: m.authorMemberId,
+          authorName,
+          // `contentText` 可为 NULL（M6a 起流式折叠总是写它，但列本身可空）——
+          // 空正文会在装配层被丢掉，这里如实给空串而不是编一个占位符。
+          text: m.contentText ?? '',
+          injectMode: m.injectMode
+        }
+      }
+
+      const rows = store.message.listRecentBySession(session.id, historyLimit + 1)
+      // 多取一条只为了**知道有没有被截掉** —— 恰好取满 `limit` 时，多出来那条就是证据。
+      const capped = rows.length > historyLimit
+      const window = capped ? rows.slice(rows.length - historyLimit) : rows
+      const history = window.map(toHistory)
+      if (capped) {
+        warn(
+          'history-window-capped',
+          `会话历史超过 ${historyLimit} 条取数上限，更早的消息没有进入本轮上下文：` +
+            '压缩本应已经把旧消息折叠掉 —— 撞上这个上限说明压缩没跟上',
+          { turnId: turn.id, limit: historyLimit, fetched: rows.length }
+        )
+      }
+      if (!history.some((m) => m.id === trigger.id)) {
+        // 触发行被上限挤出窗口。实机上不可达（它刚被写入、而挤出它需要 200 条更新的消息），
+        // 但**不能因此不管**：提示词里没有本轮请求 = 模型对着空气说话。
+        // 补在末尾并如实报警 —— 补是安全的，因为「请求在最后」本来就是这段历史的形状。
+        warn('history-missing-trigger', '本轮触发行不在历史窗口里，已单独补在末尾', {
+          turnId: turn.id
+        })
+        history.push(toHistory(trigger))
+      }
+
+      const build = await buildContext(
+        {
+          turn: { id: turn.id, sessionId: turn.sessionId, workspaceId: turn.workspaceId },
+          actor: { name: actor.name, personaPath: actor.personaPath, personaHash: actor.personaHash },
+          member: {
+            id: member.id,
+            displayName: member.displayName,
+            roleDescPath: member.roleDescPath,
+            roleDescHash: member.roleDescHash
+          },
+          workspace: { name: workspace.name, dirName: workspace.dirName },
+          cwd: decision.cwd,
+          cwdSource: decision.source,
+          addDirs,
+          projects,
+          history,
+          session: {
+            compactedThroughSeq: session.compactedThroughSeq,
+            rollingSummary: session.rollingSummary
+          }
+        },
+        {
+          readText: opts.textReader,
+          // 项目记忆由**这一轮真正要跑的那个适配器**去收：`claude` 收 `CLAUDE.md` 那一套，
+          // 日后的 `codex` 收它自己认识的文件集，而装配逻辑一行都不用改（§8.5c 性质 4）。
+          collectProjectContext: (rootPath) => adapter.collectProjectContext(rootPath)
+        }
+      )
+
+      // 装配的处境**全部要留痕**：项目记忆没读到、cwd 那份被剔了、水位线有洞……
+      // 这些都是「模型看到的世界与用户以为的不一样」，而它们一个都不会让轮次失败。
+      for (const n of build.notes) {
+        warn(`context:${n.tag}`, n.message, { turnId: turn.id, level: n.level, detail: n.detail })
+      }
+      opts.onContextBuilt?.(turn.id, build.shape)
+
+      // ★ 人设读不到 = 致命。判决在这里（见文件头）：读不到意味着建立之后被删/被改，
+      // 而用一份空人设跑下去，用户会以为他的角色在干活。
+      if (build.shape.personaBytes === null) {
+        fail(
+          'protocol',
+          `角色「${actor.name}」的人设文件读不到（${actor.personaPath}）。` +
+            '人设是这个角色的唯一身份来源 —— 用一份空人设跑下去，等于换了个东西在干活' +
+            '却不告诉用户，所以这一轮没有被执行。'
+        )
         return
       }
 
@@ -295,9 +478,8 @@ export function createTurnRunner(opts: TurnRunnerOptions): TurnRunner {
         turnId: turn.id,
         sessionId: turn.sessionId,
         cwd: decision.cwd,
-        messages,
-        // ★ M6a 是空串。§4.6 的装配是 M7 —— 见文件头那张表。
-        systemPrompt: '',
+        messages: build.messages,
+        systemPrompt: build.systemPrompt,
         model: actor.model,
         effort: actor.effort,
         permissionMode: permissionModeOf(member.permissionJson),
@@ -372,6 +554,25 @@ export function createTurnRunner(opts: TurnRunnerOptions): TurnRunner {
         errorText: fatalError,
         exitCode: null
       })
+
+      // ── 8. `@` 扇出（M7b）：**在 `endTurn` 之后**，理由见 `onTurnFinished` 的说明 ──
+      opts.onTurnFinished?.(turn, turnFinishedInfoOf(turn.id))
     }
+  }
+
+  /**
+   * 收集「这一轮结束时」要交给扇出的事实。
+   *
+   * ★ 读的是**刚提交的库**（`endTurn` 已经落定）：这一轮的回复、它有没有干活。
+   * 两件事都必须从库里读，不能从内存里的流事件攒 —— 「这一轮到底产出了什么」
+   * 的唯一事实源是库，而扇出的判据要在**归档里重判得出来**（§8.8e 纪律）。
+   */
+  function turnFinishedInfoOf(turnId: string): TurnFinishedInfo {
+    const produced = opts.store.message.listByTurn(turnId)
+    const replyText = replyTextOf(produced)
+    const hadWork = produced.some((m) =>
+      WORK_EVENT_KINDS.some((kind) => opts.store.message.listEventsByKind(m.id, kind).length > 0)
+    )
+    return { mentions: parseMentionsBlock(replyText), replyText, hadWork }
   }
 }

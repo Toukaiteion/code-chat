@@ -1,0 +1,81 @@
+{
+  "workspace": [
+    {
+      "id": "8a904560-508b-4c33-8c88-0d9a551aed06",
+      "name": "Nova",
+      "active_project_id": null,
+      "created_at": 1790183394766,
+      "updated_at": 1790183394766,
+      "archived_at": null,
+      "dir_name": "Nova"
+    }
+  ],
+  "project": [
+    {
+      "id": "128accc3-add1-4d2d-8418-9096b0baca44",
+      "workspace_id": "8a904560-508b-4c33-8c88-0d9a551aed06",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790183394773,
+      "last_opened_at": null
+    }
+  ],
+  "actor": [
+    {
+      "id": "9bd4c51d-230b-4766-bbc6-bcdba2e61f75",
+      "name": "Atlas",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\persona.md",
+      "persona_hash": "e2f56f2c5b34d4780dcd19de020e0015523140173694e18009a9c045b5f23f4a",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790183394776,
+      "updated_at": 1790183394776
+    }
+  ],
+  "workspace_member": [
+    {
+      "id": "b3f8ec54-615b-49f9-8e45-2eb9012281c3",
+      "workspace_id": "8a904560-508b-4c33-8c88-0d9a551aed06",
+      "actor_id": "9bd4c51d-230b-4766-bbc6-bcdba2e61f75",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790183394779,
+      "updated_at": 1790183394779
+    }
+  ],
+  "member_project": [
+    {
+      "member_id": "b3f8ec54-615b-49f9-8e45-2eb9012281c3",
+      "project_id": "128accc3-add1-4d2d-8418-9096b0baca44",
+      "is_primary": 1,
+      "created_at": 1790183394782
+    }
+  ],
+  "session": [
+    {
+      "id": "77159d48-23ba-4d1f-9aa7-5e9025f0d1cd",
+      "workspace_id": "8a904560-508b-4c33-8c88-0d9a551aed06",
+      "member_id": "b3f8ec54-615b-49f9-8e45-2eb9012281c3",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790183394779,
+      "last_active_at": null
+    }
+  ],
+  "turn": [],
+  "message": [],
+  "message_event": []
+}

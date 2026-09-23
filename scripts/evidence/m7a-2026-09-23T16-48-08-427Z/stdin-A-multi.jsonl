@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"（历史）上一轮用户说过这句话。标记 MK-HIST-U-4b290。"}]}}
+{"type":"user","message":{"role":"assistant","content":[{"type":"text","text":"（历史）我上一轮回答过这句话。标记 MK-HIST-A-4b290。"}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"（本轮触发行，标记 MK-CUR-4b290。）\n\n请只做一件事，不要调用任何工具：\n\n把你**在这一轮开始、做任何工具调用之前**就已经在上下文里看到的、\n形如 `MK-…` 的标记串，逐字列出来，并说明你是在哪一类内容里看到的\n（系统提示词 / 工作区记忆 / 前面的对话）。\n\n没看到就说没看到，**不要猜、不要去读文件凑答案**。"}]}}

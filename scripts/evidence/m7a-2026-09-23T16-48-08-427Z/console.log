@@ -1,0 +1,103 @@
+npm warn Unknown project config "electron_mirror". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> code-chat@0.1.0 probe:m7a
+> node scripts/m7a-probe.ts
+
+(node:33160) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///G:/project/code-chat/scripts/m7a-probe.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\G:\project\code-chat\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+──── 环境 ────────────────────────────────────────────────────────────────
+  node            v24.18.0 (win32 x64)
+  CLI             D:\nodejs\node_global\node_modules\@anthropic-ai\claude-code\bin\claude.exe
+  模型            deepseek-flash
+  每臂预算硬闸    $0.5  ⇒ 三条臂最坏 $1.50
+                  ⚠️ §2.4-2：这个端点上的 cost 字段不可信，真正的兜底是墙钟超时
+  墙钟上限        180000ms / 臂
+  本次标记后缀    4b290（重放时拿它确认归档与报告是同一次）
+  ANTHROPIC_BASE_URL      https://api.deepseek.com/anthropic
+  ANTHROPIC_AUTH_TOKEN    已设置
+  ANTHROPIC_API_KEY       未设置（不打印内容）
+  ↑ 环境变量都没设时，凭据来自 CLI 自己的配置文件 —— **探针不读那个文件、也不回显任何凭据**。
+  工作区          G:\project\code-chat\scripts\evidence\m7a-2026-09-23T16-48-08-427Z\ws
+  落档目录        G:\project\code-chat\scripts\evidence\m7a-2026-09-23T16-48-08-427Z
+
+──── 真跑（**这一步会花钱**） ────────────────────────────────────────────────────
+  三条臂，每条一次独立 spawn。写完 stdin 立刻 end()，让它把话说完。
+
+▶ 臂 A-multi —— 多条消息（含 assistant 历史）
+  stderr：Error: Expected message role 'user', got 'assistant'
+▶ 臂 B-flat —— 单条扁平文本（生产现状，对照臂）
+  stderr：[claude-code:unrecognized_model] {"model":"deepseek-flash","query_source":"sdk"}
+▶ 臂 C-system —— role:system 的历史行
+  stderr：Error: Expected message role 'user', got 'system'
+
+════════════════════════════════════════════════════════════════════════
+
+──── 报告（只读归档） ──────────────────────────────────────────────────────────
+
+──── 臂 A-multi：多条消息（含 assistant 历史） ────────────────────────────────────
+  这一臂在判什么  §4.6 的整个方案押在它身上。失败模式不是「被拒绝」，是「被当成 N 轮」。
+  注入侧          归档里 3 行，本臂应该 3 行
+  墙钟            1388ms
+  ✅ 注入侧与本臂一致（3 行）—— 下面各条有依据了
+  输出侧          0 行 JSON，0 行非 JSON
+  行类型直方图    
+
+  ⚠️ 一条 `result` 都没有 —— 这是**没测到**，不是「没问题」。这一轮没跑到能下结论的地方。
+  subtype         （无）
+  num_turns       （无）
+
+  ❌ 历史 user 行 的标记（MK-HIST-U-4b290）在归档里**一次都没出现**，模型也没复述 ⇒ 这一行没被接受
+  ❌ 历史 assistant 行 的标记（MK-HIST-A-4b290）在归档里**一次都没出现**，模型也没复述 ⇒ 这一行没被接受
+  ❌ 本轮触发行 的标记（MK-CUR-4b290）在归档里**一次都没出现**，模型也没复述 ⇒ 这一行没被接受
+  模型答复        （没有 assistant 正文）
+
+──── 臂 B-flat：单条扁平文本（生产现状，对照臂） ─────────────────────────────────────────
+  这一臂在判什么  若 A 与 B 都成功，说明「多条」没有额外收益，可以退到扁平化。
+  注入侧          归档里 1 行，本臂应该 1 行
+  墙钟            5640ms
+  ✅ 注入侧与本臂一致（1 行）—— 下面各条有依据了
+  输出侧          1552 行 JSON，0 行非 JSON
+  行类型直方图    stream_event×993  system×556  assistant×2  result×1
+
+  ✅ `result` **恰好 1 条** —— 多行被理解成「同一轮的上下文」，不是「N 轮」。§4.6 的数组装配可行。
+  subtype         success
+  num_turns       1
+
+  ✅ 历史 user 段 的标记（MK-HIST-U-4b290）出现在第 1114 行的 `assistant` 里，且**之前没有 tool_result** ⇒ 它一开始就在上下文里
+  ✅ 历史 assistant 段 的标记（MK-HIST-A-4b290）出现在第 1114 行的 `assistant` 里，且**之前没有 tool_result** ⇒ 它一开始就在上下文里
+  ✅ 本轮段 的标记（MK-CUR-4b290）出现在第 1114 行的 `assistant` 里，且**之前没有 tool_result** ⇒ 它一开始就在上下文里
+  模型答复        没有调用任何工具。以下是我在本轮开始、任何工具调用之前就已经在上下文里看到的 `MK-…` 标记，逐字列出： | 标记串 | 出现在哪一类内容里 | |---|---| | `MK-ROOT-4b290` | 项目指令 —— 工作区根目录的 `CLAUDE.md`（"本项目记忆标记：MK-ROOT-4b290"） | | `MK-DOTCLAUDE-4b290` | 项目指令 —— `.claude/CLAUDE.md`（"本项目记忆标记：MK-DOTCLAUDE-4b290"） | | `MK-HIST-U-4b290` | 前面的对话 —— 被引用为历史的上一条用户消息（"（历史）上一轮用户说过这句话。标记 MK-HIST-U-4b290。"） | | `MK-HIST-A-4b290` | 前面的对话 —— 被引用为历史的我上一轮回答（"（历史）我上一轮回答过这句话。标记 MK-HI…（共 804 字）
+
+──── 臂 C-system：role:system 的历史行 ───────────────────────────────────────
+  这一臂在判什么  §5.6 要求项目切换落成 message(role=system)。它上得了线吗。
+  注入侧          归档里 2 行，本臂应该 2 行
+  墙钟            695ms
+  ✅ 注入侧与本臂一致（2 行）—— 下面各条有依据了
+  输出侧          0 行 JSON，0 行非 JSON
+  行类型直方图    
+
+  ⚠️ 一条 `result` 都没有 —— 这是**没测到**，不是「没问题」。这一轮没跑到能下结论的地方。
+  subtype         （无）
+  num_turns       （无）
+
+  ❌ system 历史行 的标记（MK-SYSARM-4b290）在归档里**一次都没出现**，模型也没复述 ⇒ 这一行没被接受
+  ❌ 本轮触发行 的标记（MK-CUR-4b290）在归档里**一次都没出现**，模型也没复述 ⇒ 这一行没被接受
+  模型答复        （没有 assistant 正文）
+
+──── 补测：另外几个项目记忆文件会不会被 CLI 自动注入 ────────────────────────────────────────
+  §8.5c-1 只实测了根 `CLAUDE.md`（被自动注入）与 `--add-dir` 里的（不进）。
+  其余路径**没测过** —— 而不测就是默认，默认就是内容进两遍。
+
+  ❌ CLAUDE.md —— **阳性对照没成立**：归档里一次都没出现它，而 §8.5c-1 已实测它会被注入。这一轮要么跑得不对、要么端点变了 —— 下面几条「没被注入」的结论**据此不可信**。
+  ✅ .claude/CLAUDE.md —— 归档里没有它 ⇒ 没被自动注入（未知项）
+  ✅ AGENTS.md —— 归档里没有它 ⇒ 没被自动注入（未知项）
+
+  ⇒ 「被自动注入」的文件，`context-builder` 必须**剔除自己那一份**，否则同一份内容进两遍。
+
+──── 结束 ────────────────────────────────────────────────────────────────
+  归档都在上面那个目录里。**结论只在「本机默认端点」下成立**，不是 Anthropic 官方行为。
+  回写 docs/design.md §4.6 / §8.9-19 时逐条带上端点限定语。
+  重判不需要再花钱：npm run probe:m7a -- --archive=G:\project\code-chat\scripts\evidence\m7a-2026-09-23T16-48-08-427Z

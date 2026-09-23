@@ -1,0 +1,41 @@
+
+──── M7a 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m7a
+  标记后缀        bpsy
+  项目记忆文件    CLAUDE.md、AGENTS.md、.claude/CLAUDE.md、.claude/rules/notes.md
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+
+──── 启动 A · 装配 ─────────────────────────────────────────────────────────────
+  应用 A 起来了：pid=20808
+  库转储 db-A-setup.json：workspace=1 project=1 actor=1 workspace_member=1 member_project=1 session=1 turn=0 message=0 message_event=0
+  渲染进程重载完成，夹具已在界面上
+  组合根接线      onContextBuilt 在 G:\project\code-chat\src\main\index.ts
+  干跑探针（概览）  {"api":"function","on":"function","hooked":true,"header":"Nova"}
+  干跑探针（对话）  {"textarea":true,"send":16}
+  受控输入       typed=typed，发送按钮 disabled=false（应为 false）
+  页面内辅助函数 跑了 16 个（结果见归档里的 dry.helper.*）
+  A 被硬杀（pid=20808）
+
+──── 干跑结束（**没有发起任何轮次，没花钱**） ────────────────────────────────────────────────
+  地基这一层：构建产物起得来、CDP 连得上、preload 桥在构建版里可用、夹具走 IPC 全过、
+  对话视图打得开、输入区与发送按钮都在、组合根上接了 onContextBuilt。
+  ⚠️ **没测到**：`[ctx]` 那条观测通道要真跑一轮才有内容 —— 那是下一句的事。
+  下一句才是真机：npm run walk:m7a（真花钱，2 轮）。
+
+──── 干跑：只判地基（零成本，一个轮次都没发） ──────────────────────────────────────────────────
+  ✅ preload 桥在**构建产物**里可用（invoke=function on=function）—— dev 能跑不等于构建版能跑，走查跑的是构建版
+  ✅ 渲染进程重载之后桥又回来了（重载是夹具改成界面可见的唯一手段）
+  ✅ 推送钩子装上了（`stream:batch` / `stream:status` / `workspace:unread` / `app:notice`）
+  ✅ 在左栏点得中空间（装配出来的空间在界面上真的存在）
+  ✅ 顶栏渲染出来了、而且显示的是被选中的那个空间的名字：Nova
+  ✅ 点「对话」真的打开了对话视图、输入区在里面（textarea=true）
+  ✅ 发送按钮在（页面上共 16 个 button）
+  ✅ 受控输入：写进 textarea = typed，发送按钮因此变为可点（disabled=false） —— `disabled` 还是 true 就说明 React 没收到 onChange，点了发送也不会有任何事发生
+  ✅ 组合根上接了 `onContextBuilt`（G:\project\code-chat\src\main\index.ts）—— **静态核对**：它不证明那一行的运行时格式对，只证明没忘了接
+  ✅ 页面内辅助函数全跑通（16/16 个）；它们在真机上抛一次就会让采集在**已经花过钱之后**中断
+  ⚠️ ⚠️ **干跑测不到**：`[ctx]` 那条观测通道要真跑一轮才有内容（装配只在轮次里发生）—— 它是真机第一件事，`report()` 把它当第一等判据
+
+──── 干跑结束 ──────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m7a-2026-09-23T17-09-30-417Z
+  结论     地基干净，可以花真钱了（npm run walk:m7a）（另有 1 条「无法判定」）

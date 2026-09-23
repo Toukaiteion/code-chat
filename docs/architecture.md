@@ -8,11 +8,13 @@
 > —— 但也请相信本文，因为本文里每一句声称的事实都能在代码里找到，且本文会**明确标出**
 > 代码与文档不一致的地方（那些都是有意记录在案的偏离，不是笔误）。
 >
-> **代码规模**（实测，2026-09-24）：`src/` 103 个文件 / 17196 行；`test/` 27 个文件 /
-> 9293 行 / **458 个用例全部通过**（`npm test`，约 8.5 秒）。
+> **代码规模**（实测，2026-09-24）：`src/` 105 个文件 / 19519 行；`test/` 31 个文件 /
+> 11342 行 / **542 个用例全部通过**（`npm test`，约 8.4 秒）。
 >
-> **项目状态**：M0–M6b 完成并已入库。下一个里程碑是 M7（`context-builder`：`@` 派发 +
-> 历史上下文装配）。里程碑地图见 §12。
+> **项目状态**：M0–M6b 完成并已入库（M6b = `ea3d546`，其后的 `bafb4de` 是 README + 本文档的文档提交）。
+> **M7a / M7b 的代码已落地、尚未提交**
+> （按仓库约定：用户开口才提交，每块一个 commit）。下一个里程碑是 **M7c**（压缩）。
+> 里程碑地图见 §12。
 
 ---
 
@@ -63,7 +65,7 @@
 npm install          # 装 devDependencies（含 electron 本体）
 npm run dev          # electron-vite dev，热更新
 npm run build        # typecheck(node+web) + electron-vite build
-npm test             # 458 个用例，裸 Node，不碰网络不花钱
+npm test             # 542 个用例，裸 Node，不碰网络不花钱
 npm run typecheck    # 两个 tsconfig 各跑一遍 tsc --noEmit
 ```
 
@@ -78,9 +80,17 @@ npm run typecheck    # 两个 tsconfig 各跑一遍 tsc --noEmit
 | 命令 | 干什么 | 花费 |
 |---|---|---|
 | `npm run probe:m5` | 单轮真 CLI 探针（`--max-budget-usd 0.50`） | **会花钱** |
-| `npm run walk:m6a:dry` / `walk:m6b:dry` | 走查的**零成本**版本（假 CLI） | 0 |
-| `npm run walk:m6a` / `walk:m6b` | 真机走查，两轮真 CLI | **会花钱** |
+| `npm run probe:m7a` | 三臂 stdin 形态探针（M7a）；`probe:m7a:dry` 只打印载荷与 argv | **会花钱** |
+| `npm run walk:m6a:dry` / `walk:m6b:dry` / `walk:m7a:dry` / `walk:m7b:dry` | 走查的**零成本**版本（假 CLI） | 0 |
+| `npm run walk:m6a` / `walk:m6b` / `walk:m7a` / `walk:m7b` | 真机走查，真 CLI | **会花钱** |
 | `npm run walk:m6a:replay -- --archive=<dir>` | 拿既有归档**零成本重判** | 0 ⚠️ 漏掉 `--archive` 会花钱，见 §11.2 |
+| `npm run walk:m6b:replay` / `walk:m7a:replay` / `walk:m7b:replay` | 同上，但**没给 `--archive` 就直接报错退出**（M6b 起的形状） | 0 |
+
+> ★ M7b 走查的 `@` 扇出**最贵**（一轮 `@` 出去就是好几跳），所以它的 `--dry` 比别的更值钱。
+> 但它这一次**没有**抓到该抓的东西：那个「正文里多拼了一个 `@Echo`」（差 6 个字节）的脚本缺陷
+> 是**真跑**里被逐字比对的断言抓出来的 —— 三条断言变红，而产品完全是对的（design.md §8.8h 二）。
+> 结论要说准：`--dry` 挡的是**采集通道**的坏，**采集判据**的坏要等真跑才现形，
+> 所以「跑过 dry 了」不等于「这一次的结论可靠」。
 
 > ★ **纪律：花钱的走查必须先跑 `--dry`。** 这不是客气话 —— M6a 的头两次 `--dry`
 > 各抓出一个会让后面所有结论失去意义的缺陷，代价为零。见 `design.md` §8.8e 规则一。
@@ -155,6 +165,10 @@ renderer ──→ shared/ipc/contract ←── preload
 
 - 帧归约、水位线状态机、时间线排法、diff 行分类 → `src/shared/live/`（纯函数，有单测）
 - 超长行切分、`thinkingTokens` 取哪个数、`ok` 缺失时算不算成功 → 抽成函数，写清理由
+- 乒乓熔断 / 去重 / 「这条回复 `@` 了谁」→ `domain/mention-service.ts`（M7b）。
+  这三条里最贵的错**都是不报错的那种**：熔断早一跳或晚一跳都只是一个数字，
+  去重基准取错会**静默地吃掉一次正当派发**（agent 会发现「说了但没被派」且无从得知为什么）。
+  所以它们**一个字节都不写库**：给定「链上的跳」和「谁 @ 了谁」，判决是确定的、与进程状态无关的。
 
 `design.md` §4.6a 是这条纪律的正式表述：**「计算了但没渲染 = 缺陷」**，
 反过来同样成立 —— 一个要么会算错、要么会显示假的数字的判断，必须有一个能测的落点。
@@ -189,9 +203,10 @@ renderer ──→ shared/ipc/contract ←── preload
    markRunning(turn.id) 返回了行 → emit stream:status('running')              │
    → void run(turn).catch(onRunCrashed).finally(pump)   ← 刻意不 await        │
                                                                              │
-⑦ 装配 TurnContext                                                            │
+⑦ 装配 TurnContext（M7a 起：`context-builder.buildContext()`）                 │
    domain/turn-runner.ts: 读 actor/member/session → resolveTurnCwd（三级兜底）│
-   → resolveAddDirs（可见项目） → 组装 messages/model/effort/permissionMode   │
+   → resolveAddDirs（可见项目） → buildContext() 出 systemPrompt + messages   │
+   （prelude + 会话历史；细节与 M7a 的文档收口一起写）                          │
    → batcher.beginTurn() → adapters.get(agentKind).run(ctx, signal)          │
                                                                              │
 ⑧ spawn CLI                                                                   │
@@ -224,7 +239,18 @@ renderer ──→ shared/ipc/contract ←── preload
    渲染层收 stream:status 终态 → ① 先把历史读回来 ② 再丢缓冲 ③ 记 recentlyFinished
 ```
 
-**这条链上有四个「顺序是硬的」的地方**，每一处错了都不会报错、只会让界面不对：
+**⑬ 扇出（M7b）** —— 它排在 `batcher.endTurn()` **之后**，只在这条回复写了 `<mentions>` 块、
+或用户那条消息真的 `@` 了人时才有事发生：
+
+```
+turn-runner 收尾 ──onTurnFinished(turn, {mentions, hadWork})──→ process/fanout.ts
+  ① 判链（跨 session 的 hop_depth 后缀）→ 乒乓：2 跳空转警告 / 4 跳终止
+  ② 解析标记块 → 认成员（存在 / 属本空间 / 启用 / 不是自己）→ 去重
+  ③ 写转述行 + 建轮次（`hop_depth = 派发方 + 1`）→ `runtime.dispatch()`
+  `cc` 只做第 ③ 步的前半：写一行 `role: 'user'` 的历史行，**不建轮次**
+```
+
+**这条链上有五个「顺序是硬的」的地方**，每一处错了都不会报错、只会让界面不对：
 
 1. **`enqueue()` 先 emit `queued` 再 `pump()`。** 反过来的话，一个瞬间就起跑的轮次
    会先收到 `running` 再收到 `queued`，而渲染层按状态覆盖 —— 界面显示「排队中」。
@@ -233,6 +259,11 @@ renderer ──→ shared/ipc/contract ←── preload
 3. **`endTurn` 里 `emitStatus` 排在最后。** 状态是「`turn` 行现在是什么」的宣告，
    它必须在所有与之相关的批次推出去之后才发。
 4. **渲染层收到终态时「先把历史读回来，再丢缓冲」。** 见 §10 的折叠一节。
+5. **扇出排在 `batcher.endTurn` 之后**（M7b）。`endTurn` 是提交终态的那个事务；
+   扇出要读的正是**刚提交的库**（这一轮的回复正文、它有没有干活）。
+   先扇出就会读到「这一轮还没有回复」的库 —— 症状是**它的 `@` 全都不生效**，
+   而每一处都不报错。同一条纪律的另一面：取消排队的三步（库 → 内存 → 推送）
+   照抄 `turn:stop`，**顺序也不许调**。
 
 ---
 
@@ -650,19 +681,17 @@ CLI 到底用哪些 subtype 报「超预算」和「被中断」，**尚无实�
 「我第一版读的是顶层，于是永远拿到空串 —— 一个『看起来在工作、其实永远读不到东西』的
 解析函数。靠探针归档里那一行原文才发现。」
 
-#### 6.3.7 `project-context.ts`：⚠️ **没有任何生产代码调用它**
+#### 6.3.7 `project-context.ts`：**已被装配层消费**（原文是 ⚠️「没有任何生产代码调用它」）
 
-这是本文档必须点明的一处：`collectProjectContext` / `projectContextSources`
-在**生产装配路径上零调用**，只有测试与文档在用它。
+> **这一条标题在 2026-09-23 之前是真的**：那时 `collectProjectContext` /
+> `projectContextSources` 在**生产装配路径上零调用**，只有测试与文档在用它。
+> **M7a 之后它被消费了**（`context-builder.ts` 通过注入的 `deps.collectProjectContext` 调它，
+> 再被 `turn-runner` 装配）—— 而**剔除 cwd 那一份**的规则住在 `context-builder`，
+> **不在这个文件里**：`project-context.ts` 的职责是「如实收全」，一个字节没改（§8.5c）。
+> 条目里那些纪律仍然有效，只是它们现在**有调用方了**。
+> ⚠️ 更细的接线（含 cwd 那份 `CLAUDE.md` 到底怎么处理、走查结论）**与 M7a 的文档收口一起写**。
 
-唯一明确表态的地方是 `domain/turn-runner.ts` 的注释：
-
-> 另外本函数**不调 `collectProjectContext`**（§8.5c 把它放在首条 user 消息里，
-> 属于上下文装配 = M7）—— 但 agent 并非全盲：**cwd 里的 `CLAUDE.md` 由 CLI 自己
-> 自动注入**（M5 实测），而 `--add-dir` 目录里的那份不会。M6a 只如实记录这条不对称，
-> 去重规则是 M7 的。
-
-它自己的四条纪律值得先记下来（M7 会用）：
+它自己的四条纪律（M7a 起被真正用到）：
 
 - **`~/.claude/CLAUDE.md` 不扫。** 那是用户**全局**的记忆，不属于任何项目；
   把它当项目上下文注入，等于每个项目都悄悄带上用户的私人配置。
@@ -679,11 +708,16 @@ CLI 到底用哪些 subtype 报「超预算」和「被中断」，**尚无实�
 ### 6.4 `domain/` —— 业务规则（不认识 electron / sqlite）
 
 ```
-scheduler.ts (309)    队列、并发槽位、启动清扫
-turn-runner.ts (377)  跑一轮：装配上下文 → 驱动适配器 → 喂合批器 → 收尾
-turn-cwd.ts (104)     cwd 三级兜底（纯函数）
-tool-diff.ts (164)    file_diff 的合成器（format 的所有者）
+scheduler.ts (309)       队列、并发槽位、启动清扫
+turn-runner.ts (578)     跑一轮：装配上下文 → 驱动适配器 → 喂合批器 → 收尾 → 扇出
+turn-cwd.ts (104)        cwd 三级兜底（纯函数）
+tool-diff.ts (164)       file_diff 的合成器（format 的所有者）
+mention-service.ts (571) 三条熔断 + 跳数记账 + 转述正文（纯判断，不写库）
 ```
+
+> `context-builder.ts`（M7a，607 行）与 `compaction-service.ts`（M7c）的条目排在后面，
+> 与各自的文档收口一起写 —— 这一段的位置说明**它们的条目还没落定**，
+> 别读成「装配层没有这个东西」（代码已经在了，见 §4 的 ⑦ 与 design.md §4.6）。
 
 #### 6.4.1 `scheduler.ts`
 
@@ -836,12 +870,40 @@ workspace.active_project_id        →  该项目的 root_path   ← 空间「�
 —— 一个以 `../../..` 开头的「相对路径」比绝对路径更难读，而且它其实是在说
 「这个文件不在你这个项目的目录里」，那正是该被看见的信息。Windows 上用正斜杠展示。
 
+#### 6.4.5 `mention-service.ts`：三条熔断的判决处
+
+**为什么必须存在**：`design.md` §4.5b 的三条熔断（乒乓 / 去重 / 广播）从 M5 **改派**给 M7，
+理由是它们的**每一个基准都建立在 `@` 派发链上**。M7b 落地时它们没有散在 `turn-runner` 里，
+而是聚成这一个文件，因为三条**全是纯判断**（见 §3.1 规则三）。
+
+**边界（写死在这一个文件里）**：
+
+- **不写库**、不 `import` `node:crypto`（`dedupeKeyOf` 的哈希由调用方算）、只 `import type`。
+- **只判「谁该被派」，不派**。建轮次、写转述行、取消排队都在 `process/fanout.ts`，
+  且必须走既有的两个原语（§4.5a 规则一：派发只经过 `dispatch`，取消只经过 `cancelQueued`）。
+
+**它的七件东西**：标记块解析（`parseMentionsBlock` / `stripMentionsBlock`）、
+「这一轮的回复正文」（`replyTextOf`）、跳数（`hopDepthOf`）、判链（`chainOf`）、
+乒乓（`pingPongOf`）、去重与扇出（`dedupeKeyOf` / `fanoutOf`）、转述正文（`relayTextOf`）。
+
+**三处「错了不报错」的地方**（细节都在 design.md §4.5b-1，这里只记形状）：
+
+1. **判链必须是「跨 session」的后缀**（本空间内按 `queued_at` 排序、`hop_depth` 逐跳 `-1`）。
+   按 session 走那条后缀的话，A↔B 的乒乓在两边各只剩一跳，**熔断永远不触发** —— 而且不报错。
+2. **「实质工作」的判据只有一处**：`WORK_EVENT_KINDS = ['tool_start', 'file_diff']`。
+   `turn-runner`（算刚结束那一跳）与 `process/fanout`（算更早的跳）都读它；
+   各写一份就会出现「同一跳在两处被判成不同结果」那种安静的错。
+   第三条（「没有新信息」）**判不了**，如实记在该文件头部与 design.md §4.5b-1。
+3. **`fanoutOf` 不因成员数而拒绝**（§4.5b 第 3 条：广播不单独设机制）——
+   文件头那段抄写就是用来拦住下一个「要不要给广播加个上限」的人的。
+
 ### 6.5 `process/` —— 运行时管道
 
 ```
 child-registry.ts (300)  活子进程登记处 + 中断阶梯（唯一实现）
 event-batcher.ts (1123)  ★ 最大也最核心：帧的分配、合批、落库、推送、重放、抑制
 runtime.ts (268)         ★ 唯一的装配点（也是唯一的管道入口）
+fanout.ts (527)          `@` 扇出的执行侧：验成员 → 去重 → 转述 → 建轮次/取消排队
 ```
 
 #### 6.5.1 `runtime.ts`：为什么是三个具体回调而不是一个泛化的 Registry
@@ -1568,15 +1630,16 @@ errcode **2067 / 1555 / 787** 映射成 `E_CONFLICT` / `E_CONFLICT` / `E_FK_MISS
 
 ## 11. 测试与走查
 
-### 11.1 `npm test` —— 458 个用例，8.5 秒，零成本
+### 11.1 `npm test` —— 542 个用例，8.4 秒，零成本
 
 ```
 test/adapter/   claude-adapter(344) cli-locator(160) project-context(241) stream-json-parser(757)
-test/domain/    scheduler(473) tool-diff(188) turn-cwd(145)
+test/domain/    context-builder(450) mention-service(451) scheduler(473) tool-diff(188) turn-cwd(145)
+test/infra/     text-file(165)
 test/ipc/       delete(344) errors(188) import(449) registry(538) schemas(192)
-                space-dir(157) turn(462) workspace-dir(194) helpers(475)
-test/persist/   migrations(181) repositories(535) schema(382) turn-usage(204)
-test/process/   child-registry(375) event-batcher(1033)
+                space-dir(157) turn(552) workspace-dir(194) helpers(477)
+test/persist/   migrations(181) repositories(744) schema(382) turn-usage(204)
+test/process/   child-registry(375) event-batcher(1033) fanout(682)
 test/shared/    frame-buffer(338) history(286) patch-lines(79) timeline(174) watermark(399)
 ```
 
@@ -1624,6 +1687,7 @@ test/shared/    frame-buffer(338) history(286) patch-lines(79) timeline(174) wat
 - `walk:m6a:replay` **就是** `walk:m6a` 本身 —— 漏掉 `--archive=<目录>` 时
   它会照常跑一次真 CLI（**花钱**）。
 - `walk:m6b:replay` 没有 `--archive` 时**直接报错退出**，不采集。
+- M7a / M7b 的走查**照抄了 M6b 那一种**（有一道 `REPLAY_ONLY && !archive` 的守卫）。
 
 M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 replay 的命令在打错字时花钱，
 是这把枪自己走火。」
@@ -1650,17 +1714,26 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 | M5 | **适配层**：spawn CLI、解析、中断阶梯、探针实测 | `40f3c86` |
 | M6a | **主进程管道**：调度器 + 执行器 + 合批器 + 落库 + `turn:send`/`stream:resume` + `file_diff`，**零新界面** | `5f1c6c8` |
 | M6b | **流式对话界面**：`live` slice + 流式渲染 + 历史重放 + 成本常驻 + `stream:status` 的生产者 | `ea3d546` |
-| **M7**（下一个） | `context-builder`：`@` 派发 + 历史上下文数组化 + 压缩 | — |
+| （文档） | README + 本文档（面向新人的实现走读） | `bafb4de` |
+| M7a | **`context-builder`**：历史数组化 + `systemPrompt` + 两件未实测事实的探针（2026-09-23 落地；commit 未做） | — |
+| M7b | **`@` 派发 + 跳数记账 + 三条熔断**：`mention-service.ts` / `process/fanout.ts`（2026-09-24 落地；commit 未做） | — |
+| **M7c**（下一个） | **压缩**：`compaction-service.ts` + 阈值 + 确定性摘要 + `inject_mode` 的消费 | — |
 | M8–M11 | 见 `design.md` §六 | — |
 
-**M7 的三件已知债，来源都在代码注释里**：
+> commit 列空着不是遗漏：本仓库的约定是**用户开口才提交**，
+> 而 M7 被切成三块、每块一个 commit（`design.md` §六）。
 
-1. **多轮历史**：`turn-runner` 只传这一轮的 user 消息，`systemPrompt` 是空串
-   → 同一会话的第二轮不记得第一轮。
-2. **`@` 派发**：`Composer` 的成员是**选**的，不从文本解析。
-3. **`renderTurnInput` 的临时实现**：往 stdin 只写一条 user 消息。
-   注释逐字：「**M5 这一处是暂时违反 §4.6 的，不是满足它。** 记进待办，
-   别让它安静地变成 M7 的既成事实。」
+**M6b 末列的三件已知债，现状**（来源都在代码注释里）：
+
+1. ~~**多轮历史**：`turn-runner` 只传这一轮的 user 消息，`systemPrompt` 是空串~~
+   → **M7a 已闭合**（`buildContext` 接进 `turn-runner`）。
+2. ~~**`@` 派发**：`Composer` 的成员是**选**的，不从文本解析~~ → **M7b 已闭合**
+   （用户侧仍是**选**的，那是设计；agent 侧从 `<mentions>` 块解析，§3.1a）。
+3. **`renderTurnInput` 的临时实现**（往 stdin 只写一条 user 消息）：
+   注释逐字写着「**M5 这一处是暂时违反 §4.6 的，不是满足它。** 记进待办，
+   别让它安静地变成 M7 的既成事实。」—— 它的结论属于 **M7a 的验收**（design.md §4.4e
+   与 §8.9-19：CLI 的 stream-json 输入到底接受不接受多条消息），
+   **与 M7a 的文档收口一起写**。这一行的位置说明那个结论还没落定。
 
 ---
 
@@ -1732,10 +1805,14 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 
 - **不能停止一个正在跑的轮次**：`turn:stop` 的 `running` 分支返回 `E_NOT_IMPLEMENTED`
   带 `milestone:'M9'`。`turn:interject` 与 `turn:stopAll` 是显式 `defer`。
-- **不能 `@` 派发**：`Composer` 用成员选择器。`@` 派发是 M7。
-- **第二轮不记得第一轮**：`turn-runner` 只传这一轮的 user 消息，`systemPrompt` 是空串。
-- **不做历史上下文拼接**：M7 的 `context-builder`。
-- **`collectProjectContext` / `projectContextSources` 零生产调用**（见 §6.3.7）。
+  ★ 与 §4.5b 的「强制终止该链」不矛盾：那一条**不含** abort 在跑的轮次（design.md §4.5b-1）。
+- ~~**不能 `@` 派发**~~ ✅ **M7b 已落地**（2026-09-24）：用户侧结构化采集，
+  agent 侧从约定的 `<mentions>` 标记块解析（§6.4.5），三条熔断同在。
+  已知的边界见 §14.4 与 design.md §4.5b-1。
+- ~~**第二轮不记得第一轮** / **不做历史上下文拼接** / **`collectProjectContext` 零生产调用**~~
+  ✅ **M7a 已落地**（2026-09-23）：`turn-runner` 现在调 `context-builder.buildContext()`，
+  装配细节（含 cwd 的 `CLAUDE.md` 怎么处理、走查结论）**与 M7a 的文档收口一起写**。
+  这一行的位置说明那一段还没落定 —— 别读成「装配层还不存在」。
 - **`codex` 没有适配器**：`registry.ts` 的表里是 `null`，调用方会得到一句人话。
 - **`AGENT_ERROR_CODES` 里 4 个码零生产点**（`protocol` / `parse` / `budget_exceeded` /
   `aborted`，见 §7.1）。
@@ -1743,6 +1820,12 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 
 ### 14.4 有损 / 降级（做了，但会丢东西，且都记着）
 
+- **`@` 去重的基准是 `queued` 的尾部，而它是进程内的**（M7b）。重启时 `queued` 的行
+  被 `reapOrphans` 翻成 `failed`，于是**重启后去重基准是空的**。
+  正确且无害（重启后本来就没有队列，§4.5「不自动恢复」），但「去重是进程内有效的、
+  不是持久的」必须写在有损这一栏里，否则下一次有人会以为它跨重启成立。
+  同类的一条：去重键是**内容同一性**的（`(目标成员, sha256(转述正文))`），
+  同一件事**换一种说法**再派一次不会被合并。
 - **`thinking_end` 不落库**，所以从历史拼出来的缓冲没有「思考分段」这个事实。
   代价：历史里看不出「这段思考之后模型还说了话、之后又想了第二段」的边界。
   这是**已知的有损**。
@@ -1776,6 +1859,22 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 > **这一条是读代码时发现的，不是走查抓到的。**
 
 也就是说：这份文档里所有的实测数字都来自归档，而**代码库此刻的状态比那些归档新一点**。
+
+**M7b 这一次的形态正好相反，值得记一句**：它走查之后、进库之前**只改了走查脚本本身**
+（报告里那三条 ❌ 全是采集判据的错，`src/` 一个字节没动，见 design.md §8.8h）。
+⇒ 对 M7b 而言，**归档与代码库是同一份状态**，上面那句通例在这里不成立。
+
+它的走查另有三条**如实记着的留白**，都不该被读成「坏了」：
+① 「终止时取消排队中的同链条轮次」在**线性链**下不可达（链上每次只有一跳在跑，
+后面没有兄弟排队跳）—— 它由 `test/process/fanout.test.ts` 覆盖，**不靠真机**；
+② `fanout:mention-self` 是**模型侧**行为（转述正文里逐字带着原文的 `@名字`，成员会照着回 @）。
+它在这一跑里**真的出现过一次**（Sable 的 1 跳那一轮），产品把它拦下了 ——
+但走查**判不了它会不会出现**，只能如实报「出现了一条」，别把它当成验收项；
+③ 去重的**正反两侧都在同一次真跑里出现了**，值得点名：`fanout:mention-deduped` 有一条、
+指名 **Juno**、理由「还没开始跑」（它还在 `queued` 尾部 ⇒ 合并）；
+而同一次发送里 **Nyx 拿到了 2 条转述 / 2 条轮次** —— 因为它第一轮已经不在 `queued` 尾部
+（在跑或已结束），于是**照样被派**。这正是 §4.5b 第 2 条的「已经执行过 ⇒ 可以再派」，
+**实测到的**，不是只在单测里构造的。
 
 ---
 

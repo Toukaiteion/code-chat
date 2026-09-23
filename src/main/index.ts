@@ -110,9 +110,34 @@ function startBackend(): void {
       emitBatch: (batch) => registry?.emit('stream:batch', batch),
       emitUnread: (payload) => registry?.emit('workspace:unread', payload),
       emitStatus: (payload) => registry?.emit('stream:status', payload),
+      /**
+       * ★ M7b 之前 `app:notice` **只有启动期**一个生产者（下面的 `notify`）。
+       * 现在运行时的熔断（乒乓 2 跳警告 / 4 跳终止）也要走它 —— 而 §4.5b 要求的
+       * 那条「可见警告」正是这条通道。
+       *
+       * ⚠️ 走 `registry.emit` 而**不是** `notify()`：`notify` 是给「窗口还没加载完」
+       * 那段时间用的（它把通知攒进队列等 `did-finish-load`），而轮次结束时窗口早就在了 ——
+       * 攒进那个队列的通知**永远不会被冲出去**（`flushNotices` 只跑一次）。
+       */
+      emitNotice: (notice) => registry?.emit('app:notice', notice),
       now: () => Date.now(),
       newId: () => randomUUID(),
-      onWarn: (tag, message, detail) => console.warn(`[runtime:${tag}] ${message}`, detail ?? '')
+      onWarn: (tag, message, detail) => console.warn(`[runtime:${tag}] ${message}`, detail ?? ''),
+      /**
+       * ★ M7a 的观测缝：**一轮到底发了什么上下文**。
+       *
+       * 在这之前那件事是**零观测**的 —— 装配产物只在内存里，`db-*.json` 看不到它，
+       * 界面上也没有任何痕迹。走查要对它下断言，而它没有别的落档处。
+       *
+       * 写的是一行 JSON 到**主进程 stdout**，理由是「这条通道已被证明存在」：
+       * M6b 的归档里 `app-A.stdout.log` 就有主进程 `console.log` 的输出。
+       * 走查（`scripts/m7a-walkthrough.ts`）读那一行、`rec()` 进 `events.jsonl` ——
+       * 于是**报告仍然只读归档**，重放零成本。
+       *
+       * ★ 传的是 `ContextShape`，**不含任何正文**：够回答「装配对不对」，
+       * 不够泄露用户的项目内容（归档是要进版本库的）。
+       */
+      onContextBuilt: (turnId, shape) => console.log(`[ctx] ${JSON.stringify({ turnId, shape })}`)
     })
 
     const ctx = createContext({ store, sys, runtime, view })

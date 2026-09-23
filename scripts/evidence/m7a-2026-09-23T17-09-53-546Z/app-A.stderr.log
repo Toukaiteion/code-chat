@@ -1,0 +1,20 @@
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/d2a96e94-98ed-467c-a19d-7001237a5c2a
+[runtime:context:cwd-claude-md-suppressed] 工作目录的 CLAUDE.md、.claude/CLAUDE.md 未注入：CLI 会自己带进来 {
+  turnId: '7e57a96c-6860-4785-a052-fc7299c9e2b6',
+  level: 'info',
+  detail: {
+    rootPath: 'C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj',
+    relPaths: [ 'CLAUDE.md', '.claude/CLAUDE.md' ]
+  }
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: '7e57a96c-6860-4785-a052-fc7299c9e2b6', sample: undefined }
+[runtime:context:cwd-claude-md-suppressed] 工作目录的 CLAUDE.md、.claude/CLAUDE.md 未注入：CLI 会自己带进来 {
+  turnId: 'e4a25710-c8c2-42b2-af51-15457e07963f',
+  level: 'info',
+  detail: {
+    rootPath: 'C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7a\\src-proj',
+    relPaths: [ 'CLAUDE.md', '.claude/CLAUDE.md' ]
+  }
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'e4a25710-c8c2-42b2-af51-15457e07963f', sample: undefined }

@@ -1,0 +1,34 @@
+
+──── M6a 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+
+──── 启动 A · 装配 + 场景 1（一次真实对话：Read + Edit） ──────────────────────────────────
+  应用 A 起来了：pid=33320
+
+采集中断：IPC member:setPrimary 失败（setup.primary）：{"code":"E_CONFLICT","message":"该成员当前可见全部项目、没有收窄列表，因此没有可挂主项目的位置；请先用 member:setVisibility 指定可见项目集合（主项目必须是其中之一）"}
+  干跑里记到一条错误：IPC member:setPrimary 失败（setup.primary）：{"code":"E_CONFLICT","message":"该成员当前可见全部项目、没有收窄列表，因此没有可挂主项目的位置；请先用 member:setVisibility 指定可见项目集合（主项目必须是其中之一）"}
+  干跑不干净 —— 先修地基，再花真钱。
+
+──── M6a 走查 · 重放归档（零成本） ────────────────────────────────────────────────────
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        1
+  ❌ 归档里缺少某次 turn:send 的结果 —— 采集没走到那一步，后面的断言无从谈起
+
+──── M6a 走查 · 重放归档（零成本） ────────────────────────────────────────────────────
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        1
+  ⚠️ 采集器记到 1 条错误 —— 下面的 ❌ 要先怀疑采集，再怀疑产品
+     [collect] IPC member:setPrimary 失败（setup.primary）：{"code":"E_CONFLICT","message":"该成员当前可见全部项目、没有收窄列表，因此没有可挂主项目的位置；请先用 member:setVisibility 指定可见项目集合（主项目必须是其中之一）"}
+  ❌ 归档里缺少某次 turn:send 的结果 —— 采集没走到那一步，后面的断言无从谈起

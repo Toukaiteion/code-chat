@@ -1,0 +1,319 @@
+
+──── M6a 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+
+──── 启动 A · 装配 + 场景 1（一次真实对话：Read + Edit） ──────────────────────────────────
+  应用 A 起来了：pid=36812
+  库转储 db-A-setup.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=0 message=0 message_event=0
+  轮次 1 = 0578a2c8-efbe-4dc6-872e-efa9110e3a82
+  终态行在 done 帧之后 249ms 落库（status=done）
+  轮次 1 终态：status=done reason=complete
+  a.ts 现在：export const x = 2 export const y = 2
+  库转储 db-A-after-s1.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=1 message=2 message_event=12
+
+──── 场景 2 · 切走 → 批次停止 + 未读；切回 → 重放 + 实时恢复 ──────────────────────────────────
+  轮次 2 = c634a150-fd89-4ce0-8153-92fe61cc7efd
+  resume：matched=true 帧=38
+  终态行在 done 帧之后 377ms 落库（status=done）
+  库转储 db-A-after-s2.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=2 message=4 message_event=108
+
+──── 硬杀 A ──────────────────────────────────────────────────────────────────
+  A 被硬杀（pid=36812）
+  库转储 db-A-after-hard-kill.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=2 message=4 message_event=108
+
+──── 启动 B · 场景 3（硬杀后历史完整重放） ────────────────────────────────────────────────
+  应用 B 起来了：pid=35984
+  库转储 db-B-after-reopen.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=2 message=4 message_event=108
+
+──── 场景 4 上半 · 发一轮，然后趁它还在跑的时候硬杀 ────────────────────────────────────────────
+  轮次 3 = ae101d07-a52a-4365-a4c3-1333efd310b6
+  运行中：status=running，已收到 6 条帧，pid=35256
+  库转储 db-B-before-kill.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=3 message=6 message_event=114
+
+──── 硬杀 B（轮次 3 运行中） ────────────────────────────────────────────────────────
+  B 被硬杀（pid=35984）
+  库转储 db-B-after-hard-kill.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=3 message=6 message_event=118
+
+──── 启动 C · 场景 4 下半（幽灵轮次与如实的原因） ────────────────────────────────────────────
+  应用 C 起来了：pid=26412
+  重开后轮次 3：status=failed reason=null
+  库转储 db-C-after-reopen.json：workspace=2 project=2 actor=1 workspace_member=2 member_project=2 session=2 turn=3 message=6 message_event=118
+
+──── 收尾 · 让 C 正常退出 ─────────────────────────────────────────────────────────
+  C 正常退出 —— 这一条会如实进报告
+
+──── 采集结束 ──────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m6a-2026-09-23T14-17-16-841Z
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        3
+
+──── 场景 1 · 一轮真实对话：批次 / seq / 拼接 / diff / usage / 终态 ───────────────────────
+  ✅ `stream:batch` 到达 11 批（≥2 才算「流式」而不是一次性）
+  帧的种类        thinking_end×3  text×5  tool_start×2  tool_result×2  file_diff×1  usage×1  done×1
+  ✅ 帧 seq 分配自洽（首帧 = fromSeq、末帧 ≤ toSeq、批间严格递增）
+  ✅ ★ 帧 seq **跨轮次单调**（计数器挂在 session 上、不随轮次销毁）：轮次 1 最大 15，轮次 2 最小 16
+  ✅ text 被拼接：5 条 text 帧、共 82 字、最长一条 29 字（端点一个 delta 只有几个字符，长帧就是合并的证据）
+  流式正文        I'll do exactly those two things.把 a.ts 第 1 行 `export const x` 的值从 1 改成了 2，其余内容未动。
+  ⚠️ thinking 帧 0 条、共 0 字（本端点带正文；换了端点没有思考也不该算坏，见 §2.4-1）
+  ✅ thinking_end 帧 3 条（≥ thinking 帧数 0 是正常的：本端点每条 assistant 消息都以 thinking 块开场，其中有些块没有任何可见增量）
+  ✅ `file_diff` 出现 1 条（目标是 a.ts）
+  diff 的 path     a.ts
+  diff 的 patch    -export const x = 1 +export const x = 2
+  ✅ ★ diff 的内容就是那次 Edit（一行走、一行来）
+  ✅ patch 里没有行号 —— 位置未知，不许用数字盖住
+  ✅ ★ 磁盘侧：沙箱里的 a.ts 真的被改了（现在是 export const x = 2 export const y = 2）—— 只看 diff 帧是不够的：帧是**我们**合成的，盘上那个文件才是结果
+  ✅ `usage` 帧的五个数字字段都在（in=18963 out=206 cacheRead=37248 cacheCreation=0 thinkingTokens=0）
+  缓存/思考实测   cacheRead=37248 cacheCreation=0 （非零**不是** M6a 的验收项 —— M7 才要求缓存命中非零）
+  ✅ `done.reason = complete`（期望 complete）
+  ✅ 这一轮没有 error 帧（实测 0 条）
+  工具调用        Read → Edit
+  ✅ 工具序列里有 Edit（Read → Edit）
+  ✅ 库里的轮次行：status=done terminal_reason=complete
+  终态行滞后    249ms —— done 帧先到渲染层，终态行后落库；两者隔着适配器生成器的收尾，不是同一个事务
+  ✅ 库里的 token：in=18963 out=206（列名是 tokens_in/out，与 `TurnSchema` 的 `tokensIn/tokensOut` 不是一套写法）
+  ✅ 落库的 text 事件 5 行 / 82 字
+
+──── 场景 2 · 切走抑制与切回重放 ──────────────────────────────────────────────────────
+  ✅ ★ 切走期间收到了 Nova 的 `workspace:unread` 1 次（count=1）—— 这是「那段时间帧确实产生了」的正证据
+  ✅ 切走 250ms 之后、切回之前，页面上**再没有**该轮次的批次（实测漏过来 0 批）
+  ✅ `stream:resume` matched=true（同纪元、水位线有效）
+  ✅ resume 带的是渲染层**当前持有**的那个纪元（3c86d1e4…）
+  ✅ 重放到 38 条在途帧（把切走期间错过的那一截补上）
+  ✅ 重放的全是水位线之后的帧（fromSeq=20，重放最小 seq=21）
+  ✅ 其中 38 条是页面上**从未见过**的 —— 只有抑制真的生效才会这样
+  ✅ 切回之后实时推送恢复（又收到了批次）
+  ✅ 轮次 2 的终态：done/complete —— 切走**不影响**它跑完，被抑制的只是推送
+
+──── 场景 3 · 硬杀之后重开：历史完整、正文同源 ───────────────────────────────────────────────
+  ✅ 重开后 `turn:listLive` 为空（实测 0 条）
+  ✅ 轮次 1 在库里仍是 done（硬杀没把它变成 running/failed）；实测 done
+  ✅ `thinking_end` **没有**落库（§8.5a：线上 9 项 / 可持久化 8 项；库里实际出现的类型：done / file_diff / text / thinking / tool_result / tool_start / usage）
+  ✅ `message:list` 里有 2 条 assistant 消息
+  ✅ 消息 #1（轮次 0578a2c8…，12 条事件）：text / text / tool_start / tool_result / tool_start / tool_result / file_diff / text / text / text / usage / done
+  ✅ 恰好一条 done 事件
+  ✅ `message_event.seq` 从 1 连续到 12（每消息一个独立计数器）
+  ✅ ★ 落库正文与流式帧**逐字同源**（帧 82 字 / 库 82 字）
+  ✅ ★ 库里的 text 事件行拼起来 == `content_text`（82 字 / 82 字）
+  ✅ done 事件行如实记着终态：{"reason":"complete"}
+  外置到 blob 的事件行：0 条（>256KB 的载荷才外置）
+  ✅ 消息 #2（轮次 c634a150…，96 条事件）：thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / tool_start / tool_result / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / text / text / text / text / tool_start / tool_result / thinking / thinking / text / text / text / tool_start / tool_result / text / text / text / tool_start / tool_result / thinking / thinking / thinking / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / usage / done
+  ✅ ★ 整个会话的事件类型**并集**覆盖七种（§六 的验收原文）：done / file_diff / text / thinking / tool_result / tool_start / usage
+
+──── 场景 4 · 运行中硬杀：如实失败，没有幽灵 ────────────────────────────────────────────────
+  ✅ ★ 杀之前轮次 3 的状态是 `running` —— **这一条是场景 4 能证明任何事的前提**：不是 running 的话，下面两条什么也证明不了
+  ✅ 被杀之前已经收到 6 条帧（它确实在跑，不是还没启动）
+  ✅ 库里的 `turn.pid` = 35256（M10 收尸要靠它）
+  孤儿探测        pid=35256 是 claude.exe=false；��Ϣ: û�����е�����ƥ��ָ����׼��
+  就地清理        没有发现残留的 claude.exe（要么它自己退了，要么 pid 认不出来）
+  ✅ 重开后轮次 3 = failed（期望 failed）
+  ✅ 失败原因是**如实**的那句：应用上次退出时该轮次仍在运行，没有自动恢复
+  ✅ `terminal_reason` = null（**不是** complete；null 是诚实的 —— 清扫给不出 agent 报过的终态，硬填一个就是替它说话）
+  ✅ 库里没有 `running`/`queued` 的幽灵行（实测 0 条）
+  ✅ `turn:listLive` 为空（实测 0 条）
+  ✅ `turn:get` 走 IPC 读到的也是 failed（failed）—— 与库转储一致
+  被杀那一轮已落库的事件：10 条（thinking） —— 硬杀最多丢 33ms 的增量，终态与正文折叠是同步写的（§2.5）
+  ✅ 第 3 个实例是**正常退出**的（`will-quit` → 合批器冲空 → 关库）
+
+──── 旁证：界面上看到了什么（**不是断言**） ─────────────────────────────────────────────────
+  [A:startup] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁…（共 261 字）
+  [A:after-s2] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁…（共 261 字）
+  [B:startup] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6a\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M4 · 空间与项目 Nova 当前项目 未指定 sandbox 运行中 0/3 队列 0 用量 M6 设置 空间目录 C:\Users\RedMoon\AppData\Loc…（共 694 字）
+  [C:startup] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6a\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M4 · 空间与项目 Nova 当前项目 未指定 sandbox 运行中 0/3 队列 0 用量 M6 设置 ! 上次退出时有 1 个轮次正在运行，已标记为失败（不会自动恢复）…（共 755 字）
+  ⚠️ 启动期的 `app:notice`（「已标记为失败（不会自动恢复）」那句）**故意不断言**：
+     它是 `did-finish-load` 时冲给渲染层的，而走查的监听要连上 CDP 之后才挂得起 ——
+     那条通知到没到，取决于 React 挂载与 CDP 连接的先后，是个真实的竞态。
+     所以「失败原因如实」这一条只按**库里/通道里的**事实判，不按界面文案判。
+
+──── 结束 ────────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m6a-2026-09-23T14-17-16-841Z
+  结论     全部通过（另有 1 条「无法判定」）
+  ⚠️ 端点限定语：全部结论只在**本机默认凭据所指向的端点**下成立，不是 Anthropic 官方行为。
+
+──── M6a 走查 · 重放归档（零成本） ────────────────────────────────────────────────────
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        3
+
+──── 场景 1 · 一轮真实对话：批次 / seq / 拼接 / diff / usage / 终态 ───────────────────────
+  ✅ `stream:batch` 到达 11 批（≥2 才算「流式」而不是一次性）
+  帧的种类        thinking_end×3  text×5  tool_start×2  tool_result×2  file_diff×1  usage×1  done×1
+  ✅ 帧 seq 分配自洽（首帧 = fromSeq、末帧 ≤ toSeq、批间严格递增）
+  ✅ ★ 帧 seq **跨轮次单调**（计数器挂在 session 上、不随轮次销毁）：轮次 1 最大 15，轮次 2 最小 16
+  ✅ text 被拼接：5 条 text 帧、共 82 字、最长一条 29 字（端点一个 delta 只有几个字符，长帧就是合并的证据）
+  流式正文        I'll do exactly those two things.把 a.ts 第 1 行 `export const x` 的值从 1 改成了 2，其余内容未动。
+  ⚠️ thinking 帧 0 条、共 0 字（本端点带正文；换了端点没有思考也不该算坏，见 §2.4-1）
+  ✅ thinking_end 帧 3 条（≥ thinking 帧数 0 是正常的：本端点每条 assistant 消息都以 thinking 块开场，其中有些块没有任何可见增量）
+  ✅ `file_diff` 出现 1 条（目标是 a.ts）
+  diff 的 path     a.ts
+  diff 的 patch    -export const x = 1 +export const x = 2
+  ✅ ★ diff 的内容就是那次 Edit（一行走、一行来）
+  ✅ patch 里没有行号 —— 位置未知，不许用数字盖住
+  ✅ ★ 磁盘侧：沙箱里的 a.ts 真的被改了（现在是 export const x = 2 export const y = 2）—— 只看 diff 帧是不够的：帧是**我们**合成的，盘上那个文件才是结果
+  ✅ `usage` 帧的五个数字字段都在（in=18963 out=206 cacheRead=37248 cacheCreation=0 thinkingTokens=0）
+  缓存/思考实测   cacheRead=37248 cacheCreation=0 （非零**不是** M6a 的验收项 —— M7 才要求缓存命中非零）
+  ✅ `done.reason = complete`（期望 complete）
+  ✅ 这一轮没有 error 帧（实测 0 条）
+  工具调用        Read → Edit
+  ✅ 工具序列里有 Edit（Read → Edit）
+  ✅ 库里的轮次行：status=done terminal_reason=complete
+  终态行滞后    249ms —— done 帧先到渲染层，终态行后落库；两者隔着适配器生成器的收尾，不是同一个事务
+  ✅ 库里的 token：in=18963 out=206（列名是 tokens_in/out，与 `TurnSchema` 的 `tokensIn/tokensOut` 不是一套写法）
+  ✅ 落库的 text 事件 5 行 / 82 字
+
+──── 场景 2 · 切走抑制与切回重放 ──────────────────────────────────────────────────────
+  ✅ ★ 切走期间收到了 Nova 的 `workspace:unread` 1 次（count=1）—— 这是「那段时间帧确实产生了」的正证据
+  ✅ 切走 250ms 之后、切回之前，页面上**再没有**该轮次的批次（实测漏过来 0 批）
+  ✅ `stream:resume` matched=true（同纪元、水位线有效）
+  ✅ resume 带的是渲染层**当前持有**的那个纪元（3c86d1e4…）
+  ✅ 重放到 38 条在途帧（把切走期间错过的那一截补上）
+  ✅ 重放的全是水位线之后的帧（fromSeq=20，重放最小 seq=21）
+  ✅ 其中 38 条是页面上**从未见过**的 —— 只有抑制真的生效才会这样
+  ✅ 切回之后实时推送恢复（又收到了批次）
+  ✅ 轮次 2 的终态：done/complete —— 切走**不影响**它跑完，被抑制的只是推送
+
+──── 场景 3 · 硬杀之后重开：历史完整、正文同源 ───────────────────────────────────────────────
+  ✅ 重开后 `turn:listLive` 为空（实测 0 条）
+  ✅ 轮次 1 在库里仍是 done（硬杀没把它变成 running/failed）；实测 done
+  ✅ `thinking_end` **没有**落库（§8.5a：线上 9 项 / 可持久化 8 项；库里实际出现的类型：done / file_diff / text / thinking / tool_result / tool_start / usage）
+  ✅ `message:list` 里有 2 条 assistant 消息
+  ✅ 消息 #1（轮次 0578a2c8…，12 条事件）：text / text / tool_start / tool_result / tool_start / tool_result / file_diff / text / text / text / usage / done
+  ✅ 恰好一条 done 事件
+  ✅ `message_event.seq` 从 1 连续到 12（每消息一个独立计数器）
+  ✅ ★ 落库正文与流式帧**逐字同源**（帧 82 字 / 库 82 字）
+  ✅ ★ 库里的 text 事件行拼起来 == `content_text`（82 字 / 82 字）
+  ✅ done 事件行如实记着终态：{"reason":"complete"}
+  外置到 blob 的事件行：0 条（>256KB 的载荷才外置）
+  ✅ 消息 #2（轮次 c634a150…，96 条事件）：thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / tool_start / tool_result / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / text / text / text / text / tool_start / tool_result / thinking / thinking / text / text / text / tool_start / tool_result / text / text / text / tool_start / tool_result / thinking / thinking / thinking / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / usage / done
+  ✅ ★ 整个会话的事件类型**并集**覆盖七种（§六 的验收原文）：done / file_diff / text / thinking / tool_result / tool_start / usage
+
+──── 场景 4 · 运行中硬杀：如实失败，没有幽灵 ────────────────────────────────────────────────
+  ✅ ★ 杀之前轮次 3 的状态是 `running` —— **这一条是场景 4 能证明任何事的前提**：不是 running 的话，下面两条什么也证明不了
+  ✅ 被杀之前已经收到 6 条帧（它确实在跑，不是还没启动）
+  ✅ 库里的 `turn.pid` = 35256（M10 收尸要靠它）
+  孤儿探测        pid=35256 是 claude.exe=false；��Ϣ: û�����е�����ƥ��ָ����׼��
+  就地清理        没有发现残留的 claude.exe（要么它自己退了，要么 pid 认不出来）
+  ✅ 重开后轮次 3 = failed（期望 failed）
+  ✅ 失败原因是**如实**的那句：应用上次退出时该轮次仍在运行，没有自动恢复
+  ✅ `terminal_reason` = null（**不是** complete；null 是诚实的 —— 清扫给不出 agent 报过的终态，硬填一个就是替它说话）
+  ✅ 库里没有 `running`/`queued` 的幽灵行（实测 0 条）
+  ✅ `turn:listLive` 为空（实测 0 条）
+  ✅ `turn:get` 走 IPC 读到的也是 failed（failed）—— 与库转储一致
+  被杀那一轮已落库的事件：10 条（thinking） —— 硬杀最多丢 33ms 的增量，终态与正文折叠是同步写的（§2.5）
+  ✅ 第 3 个实例是**正常退出**的（`will-quit` → 合批器冲空 → 关库）
+
+──── 旁证：界面上看到了什么（**不是断言**） ─────────────────────────────────────────────────
+  [A:startup] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁…（共 261 字）
+  [A:after-s2] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁…（共 261 字）
+  [B:startup] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6a\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M4 · 空间与项目 Nova 当前项目 未指定 sandbox 运行中 0/3 队列 0 用量 M6 设置 空间目录 C:\Users\RedMoon\AppData\Loc…（共 694 字）
+  [C:startup] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6a\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M4 · 空间与项目 Nova 当前项目 未指定 sandbox 运行中 0/3 队列 0 用量 M6 设置 ! 上次退出时有 1 个轮次正在运行，已标记为失败（不会自动恢复）…（共 755 字）
+  ⚠️ 启动期的 `app:notice`（「已标记为失败（不会自动恢复）」那句）**故意不断言**：
+     它是 `did-finish-load` 时冲给渲染层的，而走查的监听要连上 CDP 之后才挂得起 ——
+     那条通知到没到，取决于 React 挂载与 CDP 连接的先后，是个真实的竞态。
+     所以「失败原因如实」这一条只按**库里/通道里的**事实判，不按界面文案判。
+
+──── 结束 ────────────────────────────────────────────────────────────────────
+  归档目录：scripts/evidence/m6a-2026-09-23T14-17-16-841Z
+  结论     全部通过（另有 1 条「无法判定」）
+  ⚠️ 端点限定语：全部结论只在**本机默认凭据所指向的端点**下成立，不是 Anthropic 官方行为。
+
+──── M6a 走查 · 重放归档（零成本） ────────────────────────────────────────────────────
+
+──── 环境（端点限定语写在最前面） ────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m6a
+  模型            deepseek-flash  ← 本机默认凭据所指向的端点，**不是 Anthropic 官方**
+  预算闸          --max-budget-usd 0.5（每轮一道）
+  凭据            未读取、未回显、未落档（只把环境原样继承给子进程）
+  启动次数        3
+
+──── 场景 1 · 一轮真实对话：批次 / seq / 拼接 / diff / usage / 终态 ───────────────────────
+  ✅ `stream:batch` 到达 11 批（≥2 才算「流式」而不是一次性）
+  帧的种类        thinking_end×3  text×5  tool_start×2  tool_result×2  file_diff×1  usage×1  done×1
+  ✅ 帧 seq 分配自洽（首帧 = fromSeq、末帧 ≤ toSeq、批间严格递增）
+  ✅ ★ 帧 seq **跨轮次单调**（计数器挂在 session 上、不随轮次销毁）：轮次 1 最大 15，轮次 2 最小 16
+  ✅ text 被拼接：5 条 text 帧、共 82 字、最长一条 29 字（端点一个 delta 只有几个字符，长帧就是合并的证据）
+  流式正文        I'll do exactly those two things.把 a.ts 第 1 行 `export const x` 的值从 1 改成了 2，其余内容未动。
+  ⚠️ thinking 帧 0 条、共 0 字（本端点带正文；换了端点没有思考也不该算坏，见 §2.4-1）
+  ✅ thinking_end 帧 3 条（≥ thinking 帧数 0 是正常的：本端点每条 assistant 消息都以 thinking 块开场，其中有些块没有任何可见增量）
+  ✅ `file_diff` 出现 1 条（目标是 a.ts）
+  diff 的 path     a.ts
+  diff 的 patch    -export const x = 1 +export const x = 2
+  ✅ ★ diff 的内容就是那次 Edit（一行走、一行来）
+  ✅ patch 里没有行号 —— 位置未知，不许用数字盖住
+  ✅ ★ 磁盘侧：沙箱里的 a.ts 真的被改了（现在是 export const x = 2 export const y = 2）—— 只看 diff 帧是不够的：帧是**我们**合成的，盘上那个文件才是结果
+  ✅ `usage` 帧的五个数字字段都在（in=18963 out=206 cacheRead=37248 cacheCreation=0 thinkingTokens=0）
+  缓存/思考实测   cacheRead=37248 cacheCreation=0 （非零**不是** M6a 的验收项 —— M7 才要求缓存命中非零）
+  ✅ `done.reason = complete`（期望 complete）
+  ✅ 这一轮没有 error 帧（实测 0 条）
+  工具调用        Read → Edit
+  ✅ 工具序列里有 Edit（Read → Edit）
+  ✅ 库里的轮次行：status=done terminal_reason=complete
+  终态行滞后    249ms —— done 帧先到渲染层，终态行后落库；两者隔着适配器生成器的收尾，不是同一个事务
+  ✅ 库里的 token：in=18963 out=206（列名是 tokens_in/out，与 `TurnSchema` 的 `tokensIn/tokensOut` 不是一套写法）
+  ✅ 落库的 text 事件 5 行 / 82 字
+
+──── 场景 2 · 切走抑制与切回重放 ──────────────────────────────────────────────────────
+  ✅ ★ 切走期间收到了 Nova 的 `workspace:unread` 1 次（count=1）—— 这是「那段时间帧确实产生了」的正证据
+  ✅ 切走 250ms 之后、切回之前，页面上**再没有**该轮次的批次（实测漏过来 0 批）
+  ✅ `stream:resume` matched=true（同纪元、水位线有效）
+  ✅ resume 带的是渲染层**当前持有**的那个纪元（3c86d1e4…）
+  ✅ 重放到 38 条在途帧（把切走期间错过的那一截补上）
+  ✅ 重放的全是水位线之后的帧（fromSeq=20，重放最小 seq=21）
+  ✅ 其中 38 条是页面上**从未见过**的 —— 只有抑制真的生效才会这样
+  ✅ 切回之后实时推送恢复（又收到了批次）
+  ✅ 轮次 2 的终态：done/complete —— 切走**不影响**它跑完，被抑制的只是推送
+
+──── 场景 3 · 硬杀之后重开：历史完整、正文同源 ───────────────────────────────────────────────
+  ✅ 重开后 `turn:listLive` 为空（实测 0 条）
+  ✅ 轮次 1 在库里仍是 done（硬杀没把它变成 running/failed）；实测 done
+  ✅ `thinking_end` **没有**落库（§8.5a：线上 9 项 / 可持久化 8 项；库里实际出现的类型：done / file_diff / text / thinking / tool_result / tool_start / usage）
+  ✅ `message:list` 里有 2 条 assistant 消息
+  ✅ 消息 #1（轮次 0578a2c8…，12 条事件）：text / text / tool_start / tool_result / tool_start / tool_result / file_diff / text / text / text / usage / done
+  ✅ 恰好一条 done 事件
+  ✅ `message_event.seq` 从 1 连续到 12（每消息一个独立计数器）
+  ✅ ★ 落库正文与流式帧**逐字同源**（帧 82 字 / 库 82 字）
+  ✅ ★ 库里的 text 事件行拼起来 == `content_text`（82 字 / 82 字）
+  ✅ done 事件行如实记着终态：{"reason":"complete"}
+  外置到 blob 的事件行：0 条（>256KB 的载荷才外置）
+  ✅ 消息 #2（轮次 c634a150…，96 条事件）：thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / tool_start / tool_result / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / thinking / text / text / text / text / tool_start / tool_result / thinking / thinking / text / text / text / tool_start / tool_result / text / text / text / tool_start / tool_result / thinking / thinking / thinking / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / text / usage / done
+  ✅ ★ 整个会话的事件类型**并集**覆盖七种（§六 的验收原文）：done / file_diff / text / thinking / tool_result / tool_start / usage
+
+──── 场景 4 · 运行中硬杀：如实失败，没有幽灵 ────────────────────────────────────────────────
+  ✅ ★ 杀之前轮次 3 的状态是 `running` —— **这一条是场景 4 能证明任何事的前提**：不是 running 的话，下面两条什么也证明不了
+  ✅ 被杀之前已经收到 6 条帧（它确实在跑，不是还没启动）
+  ✅ 库里的 `turn.pid` = 35256（M10 收尸要靠它）
+  孤儿探测        pid=35256 是 claude.exe=false；��Ϣ: û�����е�����ƥ��ָ����׼��
+  就地清理        没有发现残留的 claude.exe（要么它自己退了，要么 pid 认不出来）
+  ✅ 重开后轮次 3 = failed（期望 failed）
+  ✅ 失败原因是**如实**的那句：应用上次退出时该轮次仍在运行，没有自动恢复
+  ✅ `terminal_reason` = null（**不是** complete；null 是诚实的 —— 清扫给不出 agent 报过的终态，硬填一个就是替它说话）
+  ✅ 库里没有 `running`/`queued` 的幽灵行（实测 0 条）
+  ✅ `turn:listLive` 为空（实测 0 条）
+  ✅ `turn:get` 走 IPC 读到的也是 failed（failed）—— 与库转储一致
+  被杀那一轮已落库的事件：10 条（thinking） —— 硬杀最多丢 33ms 的增量，终态与正文折叠是同步写的（§2.5）
+  ✅ 第 3 个实例是**正常退出**的（`will-quit` → 合批器冲空 → 关库）
+
+──── 旁证：界面上看到了什么（**不是断言**） ─────────────────────────────────────────────────
+  [A:startup] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁…（共 261 字）
+  [A:after-s2] 还没有工作空间 工作空间是这台机器上的一间「工作室」：项目、成员、以及每个成员能看到哪些项目， 都归属在它下面。 新建工作空间 空间目录建在应用数据目录下的 workspaces\ 里 —— 和数据库同一个笼子，不在「文档」里。等你建出第一个空间， 主区会把它的真实路径显示出来，并给一个「在资源管理器中打开」。 项目有三种加进来的方式。其中原地引用只是登记一行、指向你已有的目录： 不复制、不移动，删空间删项目都不会动它一个字节。 另外两种（复制、git clone）会真的在磁…（共 261 字）
+  [B:startup] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6a\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M4 · 空间与项目 Nova 当前项目 未指定 sandbox 运行中 0/3 队列 0 用量 M6 设置 空间目录 C:\Users\RedMoon\AppData\Loc…（共 694 字）
+  [C:startup] CODE CHAT 工作空间 Nova ⚙ Vega ⚙ + 新建工作空间 项目 + 添加 sandbox 原地引用 C:\Users\RedMoon\AppData\Local\Temp\cc-m6a\src-proj 成员 + 添加 Atlas Atlas · 主项目 sandbox 启用 角色库 M4 · 空间与项目 Nova 当前项目 未指定 sandbox 运行中 0/3 队列 0 用量 M6 设置 ! 上次退出时有 1 个轮次正在运行，已标记为失败（不会自动恢复）…（共 755 字）
+  ⚠️ 启动期的 `app:notice`（「已标记为失败（不会自动恢复）」那句）**故意不断言**：
+     它是 `did-finish-load` 时冲给渲染层的，而走查的监听要连上 CDP 之后才挂得起 ——
+     那条通知到没到，取决于 React 挂载与 CDP 连接的先后，是个真实的竞态。
+     所以「失败原因如实」这一条只按**库里/通道里的**事实判，不按界面文案判。
+
+──── 结束 ────────────────────────────────────────────────────────────────────
+  归档目录：scripts/evidence/m6a-2026-09-23T14-17-16-841Z
+  结论     全部通过（另有 1 条「无法判定」）
+  ⚠️ 端点限定语：全部结论只在**本机默认凭据所指向的端点**下成立，不是 Anthropic 官方行为。
