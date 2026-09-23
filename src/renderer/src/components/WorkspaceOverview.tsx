@@ -2,21 +2,26 @@ import { useEffect } from 'react'
 import { useStore } from '../store'
 import { Button } from './ui/Button'
 import { Em, PathText } from './ui/Text'
-import { ConversationMock } from './mock/ConversationMock'
 
 /**
- * 没选中任何成员/项目时的主区：这个空间**在磁盘上长什么样**，以及对话功能的现状。
+ * 没选中任何成员/项目时的主区：这个空间**在磁盘上长什么样**，以及怎么进对话。
  *
  * ★ 为什么空间目录必须显示在这里：工作空间根目录被决定放在 `app.getPath('userData')`
  *   下面 —— 那是资源管理器里**看不见**的位置。用户的所有「东西到底在哪」的直觉
  *   在这里都不成立，所以「它在哪 + 一键打开」是欠他的交代，不是可选装饰。
+ *
+ * ★ M0 那份**假对话视觉稿**（`components/mock/ConversationMock.tsx`，194 行硬编码数据）
+ *   在 M6b 删掉了 —— 真对话看得见了，它的视觉语汇由 `components/conversation/` 继承。
+ *   留着会是最糟的那种东西：一份**看起来像真的**假数据，摆在一个真的旁边。
  */
 export function WorkspaceOverview({
   workspaceId,
-  onAddProject
+  onAddProject,
+  onOpenConversation
 }: {
   workspaceId: string
   onAddProject: () => void
+  onOpenConversation: () => void
 }): React.JSX.Element {
   const paths = useStore((s) => s.pathsByWorkspace[workspaceId] ?? null)
   const loadWorkspacePaths = useStore((s) => s.loadWorkspacePaths)
@@ -72,18 +77,23 @@ export function WorkspaceOverview({
         </div>
       </section>
 
-      <section className="border-edge bg-panel/40 flex flex-col gap-2 rounded-xl border p-5">
+      <section className="border-edge bg-panel/40 flex flex-col gap-3 rounded-xl border p-5">
         <h2 className="text-ink text-sm font-semibold">对话</h2>
         <p className="text-[12px] leading-relaxed">
-          <Em>对话功能将在 M6 开放</Em> —— 调度器、流式渲染、成本统计都在那之后。
+          <Em>这个空间里所有成员的对话在同一条时间线上</Em> —— 你以某个成员的身份说话，
+          回答按发生顺序插进同一条流，跨成员、跨项目。
         </p>
         <p className="text-ink-faint text-[11px] leading-relaxed">
-          这个里程碑能做的都做了：建空间、三种方式导入项目、配成员与可见性。
-          传消息的那条链路（<span className="font-mono">turn:send</span>）是一条
-          <Em tone="dim">明确标注了里程碑</Em>的未实现通道 —— 它会如实回一句
-          「这个功能还没做」，而不是假装能用。
+          运行中的那一轮会<Em tone="dim">逐字流式显示</Em>：思考面板、工具调用、
+          文件改动，都按它们真实发生的顺序排。累计成本在顶栏，标注「估算」。
         </p>
-        <ConversationMock />
+        {/* M0 那份假对话视觉稿（`components/mock/`）到 M6b 退休了 —— 它的视觉语汇
+            由 `components/conversation/` 继承，这里换成通往真对话的入口。 */}
+        <div>
+          <Button size="sm" onClick={onOpenConversation}>
+            去对话 →
+          </Button>
+        </div>
       </section>
     </div>
   )

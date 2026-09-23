@@ -58,7 +58,7 @@ export function Sidebar({
           角色库
         </Button>
         {/* M0 那格写的是「M0 外壳 · 视觉验证」。现在界面是真的了，标记也换成真的。 */}
-        <p className="text-ink-faint px-1 font-mono text-[10px]">M4 · 空间与项目</p>
+        <p className="text-ink-faint px-1 font-mono text-[10px]">M6b · 流式对话</p>
       </div>
     </aside>
   )

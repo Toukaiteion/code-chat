@@ -17,8 +17,12 @@
     "walk:m6a": "npm run build && node scripts/m6a-pipeline-walkthrough.ts",
     "walk:m6a:dry": "npm run build && node scripts/m6a-pipeline-walkthrough.ts --dry",
     "walk:m6a:replay": "node scripts/m6a-pipeline-walkthrough.ts",
+    "walk:m6b": "npm run build && node scripts/m6b-walkthrough.ts",
+    "walk:m6b:dry": "npm run build && node scripts/m6b-walkthrough.ts --dry",
+    "walk:m6b:replay": "node scripts/m6b-walkthrough.ts --replay",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "check:helpers": "node scripts/check-page-helpers.cjs"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "3.0.2",

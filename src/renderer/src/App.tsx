@@ -21,6 +21,7 @@ import { AddProjectDialog } from './components/AddProjectDialog'
 import { ActorManagerDialog } from './components/ActorManager'
 import { MemberDetail } from './components/MemberDetail'
 import { ProjectDetail } from './components/ProjectList'
+import { ConversationPane } from './components/conversation/ConversationPane'
 import { Empty } from './components/ui/Empty'
 
 /** 哪个对话框开着。一次只可能开一个，所以用一个字段而不是三个布尔。 */
@@ -36,11 +37,13 @@ export default function App(): React.JSX.Element {
   const order = useStore((s) => s.workspaceOrder)
   const activeWorkspaceId = useStore((s) => s.activeWorkspaceId)
   const selection = useStore((s) => s.selection)
+  const view = useStore((s) => s.view)
   const loadWorkspaces = useStore((s) => s.loadWorkspaces)
   const loadActors = useStore((s) => s.loadActors)
   const loadProjects = useStore((s) => s.loadProjects)
   const loadMembers = useStore((s) => s.loadMembers)
   const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
+  const setView = useStore((s) => s.setView)
 
   const [dialog, setDialog] = useState<Dialog>(null)
 
@@ -117,35 +120,42 @@ export default function App(): React.JSX.Element {
             滚上去就看不见了。 */}
         <NoticeBar />
 
-        <div className="grid-bg flex-1 overflow-y-auto">
-          <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-6">
-            {activeWorkspaceId === null ? (
-              // 只在「有空间但一个都没选中」的这一帧出现 —— 上一段的 effect 会立刻补上。
-              // 不写「加载中」：那不是正在发生的事，实话是「还没选」。
-              <Empty title="还没有选中工作空间" hint="在左边点一个。" />
-            ) : selection === null ? (
-              <WorkspaceOverview
-                workspaceId={activeWorkspaceId}
-                onAddProject={() => setDialog({ kind: 'project' })}
-              />
-            ) : selection.kind === 'member' ? (
-              // `key` 是必须的：不换 key 的话，从一个成员切到另一个时
-              // 内部的 `useState`（职责文件草稿、二次确认）会留在原地，
-              // 「确认移除」的勾会跟着跑到下一个人身上。
-              <MemberDetail
-                key={selection.id}
-                workspaceId={activeWorkspaceId}
-                memberId={selection.id}
-              />
-            ) : (
-              <ProjectDetail
-                key={selection.id}
-                workspaceId={activeWorkspaceId}
-                projectId={selection.id}
-              />
-            )}
+        {/* 对话视图**自带滚动**（消息区长、输入区钉底），所以它不套外面那层滚动容器：
+            套进去的话页面会出现两条滚动条，而其中一条永远滚不动。 */}
+        {activeWorkspaceId !== null && view === 'conversation' ? (
+          <ConversationPane workspaceId={activeWorkspaceId} />
+        ) : (
+          <div className="grid-bg flex-1 overflow-y-auto">
+            <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-6">
+              {activeWorkspaceId === null ? (
+                // 只在「有空间但一个都没选中」的这一帧出现 —— 上一段的 effect 会立刻补上。
+                // 不写「加载中」：那不是正在发生的事，实话是「还没选」。
+                <Empty title="还没有选中工作空间" hint="在左边点一个。" />
+              ) : selection === null ? (
+                <WorkspaceOverview
+                  workspaceId={activeWorkspaceId}
+                  onAddProject={() => setDialog({ kind: 'project' })}
+                  onOpenConversation={() => setView('conversation')}
+                />
+              ) : selection.kind === 'member' ? (
+                // `key` 是必须的：不换 key 的话，从一个成员切到另一个时
+                // 内部的 `useState`（职责文件草稿、二次确认）会留在原地，
+                // 「确认移除」的勾会跟着跑到下一个人身上。
+                <MemberDetail
+                  key={selection.id}
+                  workspaceId={activeWorkspaceId}
+                  memberId={selection.id}
+                />
+              ) : (
+                <ProjectDetail
+                  key={selection.id}
+                  workspaceId={activeWorkspaceId}
+                  projectId={selection.id}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </main>
 
       <WorkspaceDialog

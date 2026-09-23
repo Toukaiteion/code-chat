@@ -48,6 +48,21 @@ export interface TurnUsage {
   terminalReason?: string | null
 }
 
+/**
+ * 一个空间的累计用量（`usageOfWorkspace` 的返回形状）。
+ *
+ * ★ `turnsWithoutUsage` **不是**附属统计，它是这个数字能否被信任的前提：
+ * `SUM` 跳过 NULL，所以 `costUsd` / `tokensIn` 只是**已知部分**的合计。
+ * 界面必须把它一并显示（「另有 N 轮无用量数据」），否则那个合计数在说谎。
+ */
+export interface WorkspaceUsage {
+  turnCount: number
+  costUsd: number
+  tokensIn: number
+  tokensOut: number
+  turnsWithoutUsage: number
+}
+
 export function turnRepo(db: DatabaseSync) {
   const s = {
     listBySession: db.prepare(
@@ -104,7 +119,30 @@ export function turnRepo(db: DatabaseSync) {
     listOrphans: db.prepare(
       `SELECT * FROM turn WHERE status IN ('queued','running') ORDER BY queued_at ASC`
     ),
-    setPid: db.prepare(`UPDATE turn SET pid = ? WHERE id = ? RETURNING *`)
+    setPid: db.prepare(`UPDATE turn SET pid = ? WHERE id = ? RETURNING *`),
+    /**
+     * ★ 空间级的用量汇总（M6b 的成本常驻显示，§5.4）。
+     *
+     * 为什么是**聚合**而不是「把 `turn:list` 的结果加起来」：那个通道**带 limit**。
+     * 拿一个有上限的列表去求和，结果看起来完全正常，只在历史变长之后悄悄变小 ——
+     * 正是 §4.6a 规则二那种「安静地少显示一样东西」。
+     *
+     * 走 `idx_turn_workspace_started ON turn(workspace_id, started_at DESC)`，
+     * 覆盖 `workspace_id = ?` 这一段，是免费索引。
+     *
+     * ★★ `SUM` **跳过 NULL**，所以这里必须同时数出「无用量数据的轮次数」。
+     * `cost_usd` / `tokens_in` / `tokens_out` 都是可空列：一轮失败、被中断、
+     * 或进程被杀时它们**就是 NULL**。只报 `SUM` 的话，界面会显示一个偏低的
+     * 数字而用户无从知道它偏低 —— 那正是这条纪律要防的谎。
+     */
+    usageOfWorkspace: db.prepare(
+      `SELECT COUNT(*)              AS turn_count,
+              SUM(cost_usd)         AS cost_usd,
+              SUM(tokens_in)        AS tokens_in,
+              SUM(tokens_out)       AS tokens_out,
+              SUM(cost_usd IS NULL) AS turns_without_usage
+         FROM turn WHERE workspace_id = ?`
+    )
   }
 
   return {
@@ -191,6 +229,30 @@ export function turnRepo(db: DatabaseSync) {
 
     listOrphans(): Turn[] {
       return (s.listOrphans.all() as Row[]).map(mapTurn)
+    },
+
+    /**
+     * 一个空间到目前为止的累计用量。
+     *
+     * ⚠️ 三处刻意的 `?? 0`，它们**不是**防御性写法：
+     *
+     * 1. 空空间：`COUNT(*)` 本来就是 0，但 `SUM(...)` 在**零行**上返回 NULL
+     *    （不是 0）。`SUM(cost_usd IS NULL)` 同理 —— 一个刚建的空间会得到
+     *    `turnsWithoutUsage: null`，那是个「未测量」的形状，而正确答案是 0。
+     * 2. `SUM(cost_usd)` 在「有轮次、但一轮都没报过用量」时也是 NULL。
+     *    这时候 `costUsd: 0` 配上 `turnsWithoutUsage === turnCount` 是**正确**的读法：
+     *    已知的合计确实是 0，而另一栏把「这个 0 不代表没花钱」说清楚了。
+     *    （两者缺一，这个 0 就成了谎。）
+     */
+    usageOfWorkspace(workspaceId: string): WorkspaceUsage {
+      const row = s.usageOfWorkspace.get(workspaceId) as Row
+      return {
+        turnCount: num(row, 'turn_count'),
+        costUsd: nnum(row, 'cost_usd') ?? 0,
+        tokensIn: nnum(row, 'tokens_in') ?? 0,
+        tokensOut: nnum(row, 'tokens_out') ?? 0,
+        turnsWithoutUsage: nnum(row, 'turns_without_usage') ?? 0
+      }
     },
 
     /**

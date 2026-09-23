@@ -18,12 +18,12 @@ import type { AgentErrorCode, EffortLevel, TerminalReason } from '../../shared/e
  *
  * | 差集 | 去向 |
  * |---|---|
- * | `session_started` / `status_changed` | 会话簿记，**不进 `message_event`**。`status_changed`（CLI 的 `system:status`，如 `requesting`）在帧上**无处可放** —— §4.3 的 `stream:status` 是**轮次**状态，不是 CLI 的内部状态。M6 丢弃它 |
- * | `usage` 多带 `cacheRead`/`cacheCreation`/`thinkingTokens` | §2.2 有这三个字段，§4.6/§5.4 要求 `cache_read_input_tokens` 被记录且非零。**M6 必须同时拓宽 `StreamFrame.usage`**，否则这个事实在帧上没地方放，M7 的验收做不成 |
+ * | `session_started` / `status_changed` | 会话簿记，**不进 `message_event`**。`status_changed`（CLI 的 `system:status`，如 `requesting`）在帧上**无处可放** —— §4.3 的 `stream:status` 是**轮次**状态，不是 CLI 的内部状态。**M6a/M6b 都丢弃它**（M6b 给 `stream:status` 补的是生产者，发的是轮次的 `queued → running → 终态`，与 CLI 的内部状态是两件事） |
+ * | `usage` 多带 `cacheRead`/`cacheCreation`/`thinkingTokens` | §2.2 有这三个字段，§4.6/§5.4 要求 `cache_read_input_tokens` 被记录且非零。✅ **M6a 已经拓宽了 `StreamFrame.usage`**（五个字段都在：`in`/`out`/`cacheRead`/`cacheCreation`/`thinkingTokens`；M6b 走查实测 `cacheRead=37248` / `155648`），这个事实在帧上已经有地方放了 |
  * | `tool_result` 多带 `structured` | §2.2：`user` 行带**顶层** `tool_use_result`（结构化，如 Read 返回 `{file:{…}}`），帧上只有 `output: string` |
- * | `text_delta` 多带 `block` | 内容块下标。**M6 实现 `textMode` 时需要它**（「最后一段 text」是 `textMode` 的定义依赖），随 `textMode` 一起进帧 |
- * | `file_diff` | **适配层目前没有生产者** —— §2.2 的映射表没有任何一行产出它，它只能从 `Edit`/`Write` 的 tool_use 输入合成。M5 不写合成逻辑，只把真实输入留档（探针⑦） |
- * | `textMode` | **待实测**。§4.3 补记 ② 明令实测前不许写死判定逻辑，M5 只如实暴露交错结构 |
+ * | `text_delta` 多带 `block` | 内容块下标。**还没进帧** —— 它只被 `textMode` 需要，而 `textMode` 至今未实现（见下一行）。M6b 的流式渲染不需要它：正文按到达序追加，不区分「第几段」 |
+ * | `file_diff` | ✅ **M6a 有生产者了**：`domain/tool-diff.ts` 的 `synthesizeFileDiff` 从 `Edit`/`Write` 的 tool_use 输入合成（零新依赖），M6b 走查实测 diff 在界面上正确渲染 |
+ * | `textMode` | **仍未实现，且仍然待实测**。§4.3 补记 ② 明令实测前不许写死判定逻辑；M6b 也没有推进它 —— 界面要的是「正文流出来」，而「最后一段 text 是不是最终答复」这个问题一旦判错，代价是把中间过程当结论渲染。留到真正需要它的那一轮 |
  *
  * **2. `TurnContext` 的所有者是本文件，不是 `domain/context-builder.ts`。**
  * 消费方定义接口，生产者（M7）去满足它 —— 这是 §4.1「服务通过构造注入」的直接推论。

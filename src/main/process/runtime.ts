@@ -3,7 +3,7 @@ import type { ChildRegistry } from './child-registry.ts'
 import type { Store } from '../persist/index.ts'
 import type { Turn } from '../../shared/entities.ts'
 import { spacePaths } from '../infra/space-dir.ts'
-import { createEventBatcher, type BatcherStore, type EventBatcher, type ResumeResult, type StreamBatch, type UnreadPayload, type ViewLike } from './event-batcher.ts'
+import { createEventBatcher, type BatcherStore, type EventBatcher, type ResumeResult, type StatusPayload, type StreamBatch, type UnreadPayload, type ViewLike } from './event-batcher.ts'
 import { createScheduler, type Scheduler, type SchedulerState, type StartupSweep } from '../domain/scheduler.ts'
 import { createTurnRunner } from '../domain/turn-runner.ts'
 import { resolveTurnCwd, type CwdDecision } from '../domain/turn-cwd.ts'
@@ -16,13 +16,17 @@ import { resolveTurnCwd, type CwdDecision } from '../domain/turn-cwd.ts'
  * 唯一能做的事就是调 `runtime.dispatch(turn)` —— 它不可能绕过调度器直接去跑适配器，
  * 因为除了本文件没有任何地方同时握着那两半（§4.5a 规则一：唯一入口）。
  *
- * ## 为什么 emit 是注入进来的两件回调，而不是一个 `Registry`
+ * ## 为什么 emit 是注入进来的三件回调，而不是一个 `Registry`
  *
  * 生产环境里 registry 与本模块**互为先后**：registry 的 `HandlerContext` 要拿到
  * runtime，而 runtime 的推送要走 registry 的 `emit`。用一个泛化的
  * `emit(channel, payload)` 把这个环藏起来，只会让「谁在什么时候才是活的」
- * 变成一个到处都要小心的隐状态。拆成两个**具体的**回调之后，
+ * 变成一个到处都要小心的隐状态。拆成三个**具体的**回调之后，
  * 调用方（`main/index.ts` / `test/ipc/helpers.ts`）自己决定那个环怎么接。
+ *
+ * （第三件 `emitStatus` 是 M6b 加的，与前两件同理：**推送的生产者只有本文件
+ * 装配的那几件东西**。`turn:stop` 要把 `queued` 翻成 `cancelled`，走的也是
+ * 门面上那个 `emitStatus`，而不是自己去找 registry —— 否则生产者的名单就散了。）
  *
  * ## 它不 import electron
  *
@@ -41,6 +45,13 @@ export interface RuntimeOptions {
   view: ViewLike
   emitBatch(batch: StreamBatch): void
   emitUnread(payload: UnreadPayload): void
+  /**
+   * 轮次状态切换的推送（`stream:status`）。
+   *
+   * ★ **不抑制**：批次按可见空间抑制，状态不抑制 —— 侧边栏要显示「谁在跑」，
+   * 那本来就是跨空间的（见 `event-batcher` 的文件头与 `channels.ts` 的四条白名单）。
+   */
+  emitStatus(payload: StatusPayload): void
   now(): number
   newId(): string
   onWarn(tag: string, message: string, detail?: unknown): void
@@ -73,6 +84,12 @@ export interface Runtime {
    */
   dispatch(turn: Turn): void
   cancelQueued(turnId: string): void
+  /**
+   * 把一次状态切换推出去。**只给 `turn:stop` 用** —— 那是唯一一个在 handler 里
+   * 写终态的路径（把 `queued` 翻成 `cancelled`，`handlers/turn.ts`）。
+   * 其余切换点都在本文件装配的那几件东西内部，各自直接调 `opts.emitStatus`。
+   */
+  emitStatus(payload: StatusPayload): void
   resume(sessionId: string, epoch: string, fromSeq: number): ResumeResult
   state(): SchedulerState
   /** 启动清扫。**只调一次**，在建好 registry 之后、窗口加载之前。 */
@@ -126,6 +143,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     view: opts.view,
     emitBatch: opts.emitBatch,
     emitUnread: opts.emitUnread,
+    emitStatus: opts.emitStatus,
     onWarn: opts.onWarn,
     ...(opts.epoch !== undefined ? { epoch: opts.epoch } : {}),
     ...(opts.flushMs !== undefined ? { flushMs: opts.flushMs } : {}),
@@ -194,7 +212,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           `执行器内部错误：${message}`
         )
       })
+      /**
+       * 这里也写了一次终态（`turn.finish`），所以**这里也得发**。
+       *
+       * 漏掉它的后果很具体：崩溃的那一轮在界面上永远停在「运行中」——
+       * 而这正是本文件开头那段「执行器崩溃不该被当成模型失败」想避免的谎。
+       * 走的是同一个 `turn.finish`，只是没经过合批器（那一轮本来就没有事件）。
+       */
+      opts.emitStatus({
+        workspaceId: row.workspaceId,
+        sessionId: row.sessionId,
+        turnId,
+        status: 'failed',
+        reason: 'crashed'
+      })
     },
+    emitStatus: opts.emitStatus,
     onWarn: opts.onWarn,
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {})
   })
@@ -216,8 +249,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     dispatch: (turn) => scheduler.enqueue(turn),
     cancelQueued: (turnId) => scheduler.cancel(turnId),
+    emitStatus: opts.emitStatus,
     resume: (sessionId, epoch, fromSeq) => batcher.resume(sessionId, epoch, fromSeq),
     state: () => scheduler.state(),
+    /**
+     * 启动清扫也把遗留轮次翻成 `failed`，但**刻意不发** `stream:status`：
+     * 此刻窗口还没加载，发了没有听众，而渲染层随后用 `runtime:getState` 读到的
+     * 是**已经落库的事实** —— 那条路更硬。
+     */
     startupSweep: () => scheduler.sweepStartup(),
     onViewChanged: (workspaceId) => {
       if (workspaceId !== null) batcher.clearUnread(workspaceId)

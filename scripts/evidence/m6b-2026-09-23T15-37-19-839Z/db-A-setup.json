@@ -1,0 +1,131 @@
+{
+  "workspace": [
+    {
+      "id": "5c0d903f-ccf6-4183-9acd-26a4665f4588",
+      "name": "Nova",
+      "active_project_id": null,
+      "created_at": 1790177841055,
+      "updated_at": 1790177841055,
+      "archived_at": null,
+      "dir_name": "Nova"
+    },
+    {
+      "id": "fe5ee06a-5e04-491e-aa39-1b01a8681077",
+      "name": "Vega",
+      "active_project_id": null,
+      "created_at": 1790177841075,
+      "updated_at": 1790177841075,
+      "archived_at": null,
+      "dir_name": "Vega"
+    }
+  ],
+  "project": [
+    {
+      "id": "ae555028-4cf1-40cd-b4c1-5637e300c740",
+      "workspace_id": "5c0d903f-ccf6-4183-9acd-26a4665f4588",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6b\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790177841064,
+      "last_opened_at": null
+    },
+    {
+      "id": "6bb589ea-9c59-4881-a4a7-0b9f0928bd74",
+      "workspace_id": "fe5ee06a-5e04-491e-aa39-1b01a8681077",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6b\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790177841080,
+      "last_opened_at": null
+    }
+  ],
+  "actor": [
+    {
+      "id": "5858bb6d-5b88-4570-88e9-a456de524714",
+      "name": "Atlas",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m6b\\persona.md",
+      "persona_hash": "e2f56f2c5b34d4780dcd19de020e0015523140173694e18009a9c045b5f23f4a",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790177841067,
+      "updated_at": 1790177841067
+    }
+  ],
+  "workspace_member": [
+    {
+      "id": "586e1525-a1e4-42b2-9192-453a9559ec17",
+      "workspace_id": "5c0d903f-ccf6-4183-9acd-26a4665f4588",
+      "actor_id": "5858bb6d-5b88-4570-88e9-a456de524714",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790177841070,
+      "updated_at": 1790177841070
+    },
+    {
+      "id": "3e536390-a321-4931-b440-a7d4350be249",
+      "workspace_id": "fe5ee06a-5e04-491e-aa39-1b01a8681077",
+      "actor_id": "5858bb6d-5b88-4570-88e9-a456de524714",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790177841082,
+      "updated_at": 1790177841082
+    }
+  ],
+  "member_project": [
+    {
+      "member_id": "586e1525-a1e4-42b2-9192-453a9559ec17",
+      "project_id": "ae555028-4cf1-40cd-b4c1-5637e300c740",
+      "is_primary": 1,
+      "created_at": 1790177841072
+    },
+    {
+      "member_id": "3e536390-a321-4931-b440-a7d4350be249",
+      "project_id": "6bb589ea-9c59-4881-a4a7-0b9f0928bd74",
+      "is_primary": 1,
+      "created_at": 1790177841084
+    }
+  ],
+  "session": [
+    {
+      "id": "7ae356a4-7b68-42b3-8bf0-fc9302af1a60",
+      "workspace_id": "5c0d903f-ccf6-4183-9acd-26a4665f4588",
+      "member_id": "586e1525-a1e4-42b2-9192-453a9559ec17",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790177841070,
+      "last_active_at": null
+    },
+    {
+      "id": "d0be3cfb-dd7d-44f7-ba60-ee126962c92a",
+      "workspace_id": "fe5ee06a-5e04-491e-aa39-1b01a8681077",
+      "member_id": "3e536390-a321-4931-b440-a7d4350be249",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790177841082,
+      "last_active_at": null
+    }
+  ],
+  "turn": [],
+  "message": [],
+  "message_event": []
+}

@@ -31,6 +31,7 @@ import type { CliLaunch } from '../../src/main/adapters/claude/claude-adapter.ts
 import { createRuntime, type Runtime } from '../../src/main/process/runtime.ts'
 import type { StreamBatch, UnreadPayload } from '../../src/main/process/event-batcher.ts'
 import type { IpcResult } from '../../src/shared/ipc/envelope.ts'
+import type { PushChannel } from '../../src/shared/ipc/channels.ts'
 
 export const NOW = 1_700_000_000_000
 
@@ -284,7 +285,12 @@ export function fakeCliLaunch(): CliLaunch {
   return { exe: process.execPath, preambleArgs: [FAKE_CLI] }
 }
 
-export type PushSink = (channel: 'stream:batch' | 'workspace:unread', payload: unknown) => void
+/**
+ * 推送落点。★ 通道那半边用 `PushChannel`（`channels.ts` 那份白名单），**不是**手抄的两个字面量 ——
+ * 手抄的话，M6b 加一条推送就会在这里冒出一个与「通道清单」无关的类型错，
+ * 而那个错指的地方（这个文件）根本不是需要改的地方。
+ */
+export type PushSink = (channel: PushChannel, payload: unknown) => void
 
 interface RuntimeKit {
   runtime: Runtime
@@ -321,6 +327,7 @@ function buildRuntime(
     view,
     emitBatch: (batch) => sink('stream:batch', batch),
     emitUnread: (payload) => sink('workspace:unread', payload),
+    emitStatus: (payload) => sink('stream:status', payload),
     now: () => NOW,
     newId: () => `rt-${++rtIds}`,
     onWarn: () => {},

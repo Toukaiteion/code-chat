@@ -27,6 +27,14 @@ export const INVOKE_CHANNELS = [
    * 而 UI 必须能如实显示它（尤其因为**改名不会移动目录**）。
    */
   'workspace:paths',
+  /**
+   * ★ 一个空间的**累计**用量（M6b，§5.4 修正条第 2 款：成本常驻显示）。
+   *
+   * 只能是聚合查询，不能把 `turn:list` 的结果加起来 —— 那条通道带 limit。
+   * 返回值里必带 `turnsWithoutUsage`：`SUM` 会跳过 NULL，缺了它这个合计
+   * 就是一个没人能发现偏低的数字（§4.6a 规则二）。
+   */
+  'workspace:usage',
 
   // ── project ────────────────────────────────────────────────
   'project:list',

@@ -21,10 +21,13 @@ import {
   PUSH_SCHEMAS,
   SessionSchema,
   StreamFrameSchema,
+  StreamStatusSchema,
   TurnSchema,
   WorkspaceMemberSchema,
-  WorkspaceSchema
+  WorkspaceSchema,
+  WorkspaceUsageSchema
 } from '../../src/shared/ipc/schemas.ts'
+import { TURN_STATUSES } from '../../src/shared/entities.ts'
 import { INVOKE_CHANNELS, PUSH_CHANNELS } from '../../src/shared/ipc/channels.ts'
 import { openStore } from '../../src/main/persist/index.ts'
 
@@ -146,6 +149,37 @@ test('StreamFrameSchema 按 k 判别：缺字段的帧被拒，未知的 k 被�
   // done 的 reason 是枚举，编不出来的理由进不来
   assert.ok(!StreamFrameSchema.safeParse({ seq: 3, k: 'done', reason: 'whatever' }).success)
   assert.ok(StreamFrameSchema.safeParse({ seq: 3, k: 'done', reason: 'interrupted' }).success)
+})
+
+// ─────────────────────────────────────────────────────────────
+// M6b 新增的两条载荷
+// ─────────────────────────────────────────────────────────────
+
+test('★ `stream:status` 的 status 只能是 `TURN_STATUSES` 里的值', () => {
+  // 这条推送是**轮次行的投影**，所以它的取值集合必须与 `turn.status` 那一个逐字相同。
+  // 放宽成 `z.string()` 的话，主进程写错一个状态会一路走到渲染层，
+  // 而渲染层只能显示一个它不认识的词。
+  const base = { workspaceId: 'w1', sessionId: 's1', turnId: 't1', reason: null }
+  for (const status of TURN_STATUSES) {
+    assert.ok(StreamStatusSchema.safeParse({ ...base, status }).success, `${status} 应当被接受`)
+  }
+  assert.ok(!StreamStatusSchema.safeParse({ ...base, status: 'zombie' }).success)
+
+  // `reason` 是**必填的可空**字段，不是可选字段：非终态发 null，终态发那个原因。
+  // 写成 `.optional()` 的话，「忘了带 reason」与「reason 确实为空」就分不开了。
+  assert.ok(!StreamStatusSchema.safeParse({ ...base, reason: undefined, status: 'queued' }).success)
+  assert.ok(StreamStatusSchema.safeParse({ ...base, reason: 'budget', status: 'failed' }).success)
+})
+
+test('★ 空空间的累计用量：四个数都是 0，**不是 null**（`SUM` 在零行上返回 NULL）', () => {
+  // SQLite 的 `SUM` 在**零行**上返回 NULL，`SUM(x IS NULL)` 同理 ——
+  // 一个刚建的空间会得到四个 null，而正确答案是「确实没花过钱」。
+  // 让它们可空的话，界面每处都要判一次 null，而那个 null 从来没有含义。
+  const s = openStore(':memory:')
+  s.repos.workspace.create({ id: 'w1', name: 'Nova', now: NOW })
+  const usage = s.repos.turn.usageOfWorkspace('w1')
+  assert.deepEqual(usage, { turnCount: 0, costUsd: 0, tokensIn: 0, tokensOut: 0, turnsWithoutUsage: 0 })
+  assert.ok(WorkspaceUsageSchema.safeParse(usage).success)
 })
 
 test('每个通道的 req 都能被一个「最小合法载荷」满足（防止写出不可能调用的通道）', () => {

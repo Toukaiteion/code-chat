@@ -36,6 +36,8 @@ interface Rig {
   failRun(turnId: string): void
   crashed: Array<{ turnId: string; message: string }>
   warns: string[]
+  /** 推送出去的每一次状态切换，按发生顺序。 */
+  statuses: Array<{ turnId: string; status: string }>
   /** 建一条 `queued` 轮次并入队。 */
   send(sessionId: string, id: string): Turn
 }
@@ -65,6 +67,8 @@ function rig(opts: { concurrency?: number } = {}): Rig {
   const started: string[] = []
   const crashed: Array<{ turnId: string; message: string }> = []
   const warns: string[] = []
+  /** 推送出去的每一次状态切换，按发生顺序。 */
+  const statuses: Array<{ turnId: string; status: string }> = []
   /** 每一轮开跑时挂起的 resolve —— 由 `finishRun` 放行。 */
   const pendings = new Map<string, () => void>()
   const toThrow = new Set<string>()
@@ -90,6 +94,7 @@ function rig(opts: { concurrency?: number } = {}): Rig {
       crashed.push({ turnId, message: err instanceof Error ? err.message : String(err) })
     },
     onWarn: (tag) => warns.push(tag),
+    emitStatus: (s) => statuses.push({ turnId: s.turnId, status: s.status }),
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {})
   })
 
@@ -99,6 +104,7 @@ function rig(opts: { concurrency?: number } = {}): Rig {
     started,
     crashed,
     warns,
+    statuses,
     finishRun(turnId) {
       const r = pendings.get(turnId)
       if (!r) throw new Error(`轮次 ${turnId} 没在跑`)
@@ -169,6 +175,41 @@ test('★ 每 session FIFO：连发三轮，开始顺序就是发送顺序', asy
   r.finishRun('t2')
   await settle()
   assert.deepEqual(r.started, ['t1', 't2', 't3'])
+})
+
+// ─────────────────────────────────────────────────────────────
+// 一之二、`stream:status` 的两个切换点（M6b）
+// ─────────────────────────────────────────────────────────────
+
+test('★ 状态推送的顺序：`queued` 一定排在 `running` **之前**', () => {
+  // `pump()` 是同步的，所以「先发 queued 再 pump」与「先 pump 再发 queued」
+  // 只差一行，但后者会让界面先收到 `running`、再收到 `queued` ——
+  // 那一行于是从「运行中」跳回「排队中」并永远停在那儿。
+  const r = rig({ concurrency: 3 })
+  r.send('s1', 't1')
+  assert.deepEqual(r.statuses, [
+    { turnId: 't1', status: 'queued' },
+    { turnId: 't1', status: 'running' }
+  ])
+})
+
+test('拿不到槽位的那一轮只发 `queued`（它确实还没开始跑）', async () => {
+  const r = rig({ concurrency: 1 })
+  r.send('s1', 't1')
+  r.send('s2', 't2')
+  assert.deepEqual(r.statuses, [
+    { turnId: 't1', status: 'queued' },
+    { turnId: 't1', status: 'running' },
+    { turnId: 't2', status: 'queued' }
+  ])
+  assert.ok(
+    !r.statuses.some((s) => s.turnId === 't2' && s.status === 'running'),
+    '★ 库里那一行还是 queued，不许提前发 running'
+  )
+
+  r.finishRun('t1')
+  await settle()
+  assert.deepEqual(r.statuses[3], { turnId: 't2', status: 'running' })
 })
 
 test('★ 一个 session 的队首占着，**不挡**别的 session —— 队列是全局扫描，不是队头阻塞', async () => {
@@ -271,6 +312,7 @@ test('★ 读得到、却写不动（两次读之间被并发写入者改了）�
   store.repos.session.create('s1', WS, M1, NOW)
 
   const warns: string[] = []
+  const statuses: string[] = []
   const t1 = store.repos.turn.create({ id: 't1', sessionId: 's1', workspaceId: WS, cwd: 'G:/ws', now: NOW })
   const s = createScheduler({
     store: {
@@ -285,12 +327,16 @@ test('★ 读得到、却写不动（两次读之间被并发写入者改了）�
     now: () => NOW,
     run: () => Promise.resolve(),
     onRunCrashed: () => {},
-    onWarn: (tag) => warns.push(tag)
+    onWarn: (tag) => warns.push(tag),
+    emitStatus: (st) => statuses.push(st.status)
   })
   s.enqueue(t1)
   await settle()
   assert.deepEqual(warns, ['dispatch-mark-running-failed'])
   assert.equal(s.state().slots.used, 0, '没派出去就不占槽位 —— 否则槽位会随这种失败一路漏掉')
+  // ★ 发的是**事实**：库里的那一行根本没被翻成 `running`，所以那一帧一帧都不该发。
+  // 发了的话界面会显示一个从来没开始过的轮次正在运行，而它永远不会结束。
+  assert.deepEqual(statuses, ['queued'], '派发失败只该有那一条 queued，不该有 running')
 })
 
 // ─────────────────────────────────────────────────────────────
@@ -328,7 +374,8 @@ test('兜底处理本身又抛时不再往外冒，只留一条诊断', async ()
     onRunCrashed: () => {
       throw new Error('兜底也炸了')
     },
-    onWarn: (tag) => warns.push(tag)
+    onWarn: (tag) => warns.push(tag),
+    emitStatus: () => {}
   })
   s.enqueue(store.repos.turn.create({ id: 't1', sessionId: 's1', workspaceId: WS, cwd: 'G:/ws', now: NOW }))
   await settle()

@@ -281,6 +281,22 @@ export const StreamBatchSchema = z.object({
   frames: z.array(StreamFrameSchema)
 })
 
+/**
+ * 空间级累计用量。**四个数都是 `number`，不是可空** ——
+ * 「还没有数据」与「数据是 0」在这里是同一件事（一个刚建的空间确实花了 0 元），
+ * 而「有哪些轮次没报用量」由 `turnsWithoutUsage` 单独回答。
+ * 让这四个字段可空的话，界面每个地方都要判一次 null，而那个 null 从来没有含义。
+ */
+export const WorkspaceUsageSchema = z.object({
+  turnCount: z.number().int().min(0),
+  /** ★ 单位是美元，但**来自 Anthropic 官方价目表**，在此端点上不等于账单（§2.4-2）。 */
+  costUsd: z.number(),
+  tokensIn: z.number(),
+  tokensOut: z.number(),
+  /** 没有用量数据的轮次数。> 0 时界面**必须**如实说明，否则上面那几个数在说谎。 */
+  turnsWithoutUsage: z.number().int().min(0)
+})
+
 export const StreamStatusSchema = z.object({
   workspaceId: z.string(),
   sessionId: z.string(),
@@ -386,6 +402,11 @@ export const INVOKE_SCHEMAS = {
       /** 目录此刻是否真的在磁盘上。`false` 时 UI 该说「目录不存在」而不是显示一个假路径。 */
       exists: z.boolean()
     })
+  },
+  /** 累计用量。**聚合读**，不接受 limit —— 见 `channels.ts` 里那一段。 */
+  'workspace:usage': {
+    req: z.object({ workspaceId: z.string() }),
+    res: WorkspaceUsageSchema
   },
 
   // ── project ────────────────────────────────────────────────
@@ -638,7 +659,15 @@ export const INVOKE_SCHEMAS = {
     res: z.object({
       liveTurns: z.array(TurnSchema),
       queueDepth: z.number(),
-      slots: z.object({ used: z.number(), total: z.number() })
+      slots: z.object({ used: z.number(), total: z.number() }),
+      /**
+       * 本进程的纪元（`event-batcher` 铸造）。渲染层拿它去调 `stream:resume`。
+       *
+       * ★ 渲染层**只能学到**它，不许自己造 —— 编一个的后果是 `resume` 一律
+       * 返回 `matched:false` + 空帧，而那个结果与「正常的空回复」长得一模一样。
+       * 见 `src/shared/live/watermark.ts` 的文件头。
+       */
+      epoch: z.string()
     })
   }
 } as const

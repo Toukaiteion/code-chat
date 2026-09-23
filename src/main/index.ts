@@ -109,6 +109,7 @@ function startBackend(): void {
       view,
       emitBatch: (batch) => registry?.emit('stream:batch', batch),
       emitUnread: (payload) => registry?.emit('workspace:unread', payload),
+      emitStatus: (payload) => registry?.emit('stream:status', payload),
       now: () => Date.now(),
       newId: () => randomUUID(),
       onWarn: (tag, message, detail) => console.warn(`[runtime:${tag}] ${message}`, detail ?? '')

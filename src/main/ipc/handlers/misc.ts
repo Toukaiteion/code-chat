@@ -49,6 +49,22 @@ export function registerMisc(r: Registry, ctx: HandlerContext): void {
    */
   r.handle('runtime:getState', () => {
     const s = ctx.runtime.state()
-    return { liveTurns: s.liveTurns, queueDepth: s.queueDepth, slots: s.slots }
+    /**
+     * ★ `epoch` 是 M6b 加的，而且是**唯一**能把这个值交给渲染层的口子。
+     *
+     * 纪元的所有者是合批器（每进程铸造一次），而渲染层要拿它去调 `stream:resume`。
+     * 没有这个字段的话，渲染层**永远学不到纪元** —— 于是要么每次重放都拿到
+     * `matched:false`（随便编一个），要么干脆不能重放（切空间回来那段尾巴就丢了）。
+     *
+     * 放在这里而不是新开一条通道：纪元本来就只在「进程活着」这个尺度上变，
+     * 而这个接口的语义正是「现在这个进程的运行时状态」。
+     * 它的**变更信号**是 `stream:status` 那条推送（§4.3 只有四条推送，不加新的）。
+     */
+    return {
+      liveTurns: s.liveTurns,
+      queueDepth: s.queueDepth,
+      slots: s.slots,
+      epoch: ctx.runtime.epoch
+    }
   })
 }

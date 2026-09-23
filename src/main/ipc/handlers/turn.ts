@@ -124,6 +124,34 @@ export function registerTurn(r: Registry, ctx: HandlerContext): void {
       // 少了它，一个已取消的 id 会一直挂在内部队列里，直到下一次取队首时才被顺手丢掉，
       // 而 `runtime:getState` 的 `dispatchable` 在那之前会多报一个数。
       ctx.runtime.cancelQueued(turnId)
+
+      /**
+       * ★ 这是**第四个**终态写入点，而且它是唯一一个在 handler 里的 ——
+       * 另外三个都在 `runtime.ts` 装配的那几件东西内部（调度器两处、合批器一处，
+       * 外加执行器崩溃那条）。所以这里必须自己发一次：漏掉的后果是那一行
+       * 在界面上永远停在「排队中」，而它在库里早就是 `cancelled` 了。
+       *
+       * 排在 `markCancelled` 与 `cancelQueued` **之后**：前者的返回值已经证明库里
+       * 那一行翻了（`!cancelled` 那条已经抛出去了），后者让内存队列与库一致。
+       * 发的是这两件事**都成立之后**的事实。
+       */
+      ctx.runtime.emitStatus({
+        workspaceId: cancelled.workspaceId,
+        sessionId: cancelled.sessionId,
+        turnId: cancelled.id,
+        status: 'cancelled',
+        /**
+         * ⚠️ 这里**就是 `null`**，而且必须是 —— `markCancelled` 那条 UPDATE 只写
+         * `status` 与 `ended_at`，**不动 `terminal_reason`**。
+         *
+         * 顺手填一个 `'user_interrupt'` 看起来更友好，但那是在**编**：库里的
+         * `terminal_reason` 仍是 NULL，于是同一件事有了两个来源且互相矛盾
+         * （`stream:status` 说 `user_interrupt`、`turn:get` 说 `null`）。
+         * 何况「是谁取消的」这个问题，`status === 'cancelled'` 已经答完了。
+         */
+        reason: cancelled.terminalReason
+      })
+
       return cancelled
     }
 

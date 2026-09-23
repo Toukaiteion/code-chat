@@ -8,20 +8,15 @@
  * ★ 「错误只有一个出口」这条纪律落在 `toNotice()` 上：所有 slice 动作的
  * 失败都经它变成 `notices` 里的一条。于是组件层**不写 try/catch、不用 alert**，
  * 用户也不会在不同地方看到三种风格的报错。
+ *
+ * ★ **`runtime` 与 `loadRuntime` 已经在 M6b 搬去 `live`。** M4 把它们寄在这里时
+ *   留了话说「M6 的调度器与 `stream:batch` 落地时会把它搬过去」—— 那就是现在：
+ *   运行概要的变更信号是 `stream:status`（§3.6），而那条推送属于 `live`。
+ *   留在这里的话，`ui` 会因为一条与它无关的推送而重渲染。
  */
 import { api } from '../ipc'
 import { IpcError } from '@shared/ipc/envelope'
-import type { ResOf } from '@shared/ipc/contract'
 import type { Slice } from './index'
-
-/**
- * 运行时概要（`runtime:getState`）。
- *
- * ⚠️ 它**本该属于 `live` slice**，而 M4 不建 `live`（见 `index.ts` 的说明）。
- * 在 M4 里它只是一个**只读的展示值**（运行中的轮、队列深度、并发槽位），
- * 所以先寄在 `ui` 下；M6 的调度器与 `stream:batch` 落地时会把它搬过去。
- */
-export type RuntimeView = ResOf<'runtime:getState'>
 
 export interface Notice {
   id: string
@@ -35,22 +30,35 @@ export interface Notice {
 /** 右侧详情面板在看谁。切换空间时清空 —— 不然会看到上一个空间的对象。 */
 export type Selection = { kind: 'member' | 'project'; id: string } | null
 
+/**
+ * 空间里在看哪一屏。
+ *
+ * ★ 「对话」是**空间级**的，与 `selection` 并列而不是它的一个分支：`selection`
+ *   说的是「在看这个空间里的哪个对象」，而对话流不是任何一个对象 ——
+ *   它是整个空间的时间线（§4.2，`UNIQUE (workspace_id, seq)`）。
+ *
+ * **切空间不清空它。** 用户在以 Atlas 的身份聊到一半、去 Nuvola 看一眼再回来，
+ * 期待的是回到对话，不是被丢回概览页。清空的是 `selection`（那是对象，
+ * 换了空间就不存在了），不是这一屏。
+ */
+export type WorkspaceView = 'overview' | 'conversation'
+
 export interface UiSlice {
   activeWorkspaceId: string | null
   activeSessionId: string | null
   selection: Selection
+  /** 空间里在看哪一屏（概览 / 对话）。见 `WorkspaceView`。 */
+  view: WorkspaceView
   /** 空间 id → 未读数（`workspace:unread` 推来的，M6 才会有非零值）。 */
   unread: Record<string, number>
   notices: Notice[]
   /** 进行中的动作，键由调用点命名（`'workspace:create'`…）。用来禁用按钮，防止双击建两个。 */
   pending: Record<string, boolean>
-  /** 进程级的运行概要。`null` = 还没读回来（不是「零个在跑」）。 */
-  runtime: RuntimeView | null
 
-  loadRuntime(): Promise<void>
   setActiveWorkspace(id: string | null): void
   setActiveSession(id: string | null): void
   select(sel: Selection): void
+  setView(view: WorkspaceView): void
   setUnread(workspaceId: string, count: number): void
   pushNotice(n: Omit<Notice, 'id' | 'at'>): void
   dismissNotice(id: string): void
@@ -102,25 +110,10 @@ export const createUiSlice: Slice<UiSlice> = (set, get) => ({
   activeWorkspaceId: null,
   activeSessionId: null,
   selection: null,
+  view: 'overview',
   unread: {},
   notices: [],
   pending: {},
-  runtime: null,
-
-  /**
-   * 读一次运行概要。**只读、幂等**，可以放心在 effect 里调（StrictMode 跑两遍无害）。
-   *
-   * M4 里它读回来的必然是「0 个在跑、队列 0、槽位 0/3」—— 而且那是**真值**：
-   * 没有调度器，就没有任何东西会进队列（`handlers/misc.ts` 有详述）。
-   * 界面照常渲染这些数字，而不是像 M0 那样摆一串编出来的 token 数和金额。
-   */
-  async loadRuntime() {
-    try {
-      set({ runtime: await api.runtime.getState() })
-    } catch (err) {
-      get().pushNotice(toNotice(err, '读取运行状态'))
-    }
-  },
 
   /**
    * 切换当前空间。
@@ -145,8 +138,28 @@ export const createUiSlice: Slice<UiSlice> = (set, get) => ({
       })
   },
 
+  /**
+   * 看某个对象（成员 / 项目）。
+   *
+   * ★ **选中一个对象同时意味着离开「对话」那一屏** —— 这是 `setView` 的**镜像**，
+   *   两者合起来是一条不变式：**「在看某一屏」与「在看某个对象」互斥**。
+   *
+   *   不对称就会有一个**静默的空点**：用户在对话视图里点侧栏的成员，`selection`
+   *   确实变了，而 `App` 按 `view` 渲染，于是那一屏还是对话 —— 点击看起来什么都没做。
+   *   把它放在这里而不是 `MemberList` / `ProjectList` 那两个调用点上，
+   *   理由与 `setView` 清 `selection` 一样：**一个判据只写一遍**。
+   *
+   * `select(null)`（清空）不动 `view`：那两处调用（删掉了正看着的对象、
+   * 从详情返回）都不是「换一屏」。
+   */
   select(sel) {
-    set({ selection: sel })
+    set(sel === null ? { selection: null } : { selection: sel, view: 'overview' })
+  },
+
+  setView(view) {
+    // ★ 同时把 `selection` 清掉。不清的话「从对话切回概览」会**跳进**
+    //   上一次点开的那个成员详情 —— 用户点的是「概览」，看到的是 Atlas 的配置页。
+    set({ view, selection: null })
   },
 
   setUnread(workspaceId, count) {

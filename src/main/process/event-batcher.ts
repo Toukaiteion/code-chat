@@ -59,6 +59,7 @@ import { synthesizeFileDiff, looksLikeEditor } from '../domain/tool-diff.ts'
 export type StreamFrame = PushOf<'stream:batch'>['frames'][number]
 export type StreamBatch = PushOf<'stream:batch'>
 export type UnreadPayload = PushOf<'workspace:unread'>
+export type StatusPayload = PushOf<'stream:status'>
 /** 帧联合里的 `usage` 那一支。窄化要显式写出来，否则返回处会被放宽回整个联合。 */
 type UsageFrame = Extract<StreamFrame, { k: 'usage' }>
 type ToolResultFrame = Extract<StreamFrame, { k: 'tool_result' }>
@@ -157,6 +158,21 @@ export interface BatcherOptions {
   view: ViewLike
   emitBatch(batch: StreamBatch): void
   emitUnread(payload: UnreadPayload): void
+  /**
+   * ★ **终态**的 `stream:status`（M6b 补上的生产者）。
+   *
+   * 为什么发在合批器这里：`turn.status` 的所有者是 `turn-repo`，而
+   * 「**状态切换的唯一时点是事务提交**」（§4.5a 规则二）。合并终态与正文折叠的
+   * 那个事务就在本文件里（`endTurn` → `commit`），所以终态的推送点只能紧跟它。
+   *
+   * ⚠️ 它与同一批里的 `done` 帧**不是同一件事**，尽管它们在 `endTurn` 这一刻
+   * 一起发生：`done` 帧说的是「这一轮的正文结束了」。正常路径上那一帧早在
+   * **249–377ms 之前**就已经随一次普通刷新发走了（M6a 实测），两者之间那段
+   * 正是「正文已完、而库里那一行还不是终态」的窗口。渲染层据此把
+   * 「流式结束」与「轮次行落定」分开处理 —— 合并成一个信号就会在那个窗口里
+   * 让界面断言一件还没发生的事。
+   */
+  emitStatus(payload: StatusPayload): void
   /** 我们自己的内部异常（落库失败、契约被违反、没有映射表的编辑工具）。**不是** `AgentEvent.error`。 */
   onWarn(tag: string, message: string, detail?: unknown): void
   /** 本进程的纪元。省略则现铸一个 —— 生产环境在 `main/index.ts` 里只铸一次。 */
@@ -1016,6 +1032,24 @@ export function createEventBatcher(opts: BatcherOptions): EventBatcher {
         lastUnreadAt = 0
         drainUnread()
       }
+      /**
+       * ★ 终态推送**排在这一批帧之后**，顺序是硬的。
+       *
+       * 它会让渲染层去重取历史、并丢掉这个轮次的缓冲。硬杀那条路径上，
+       * `done` 帧正是由上面这次 `pushDoneRow` 补出来的、就在这一批里 ——
+       * 先发状态的话，渲染层会先丢掉缓冲、再收到帧，于是**重新建出一个不完整的缓冲**，
+       * 把一条已经有完整正文的历史行又盖住了。那是「内容少了一半」的形态。
+       *
+       * ⚠️ `commit` 返回 `null` 时（落库失败）已经提前 return 了，所以走到这里
+       * 一定是事务提交成功的 —— 这正是 §4.5a 规则二要的那个时点。
+       */
+      opts.emitStatus({
+        workspaceId,
+        sessionId: t.id.sessionId,
+        turnId,
+        status: terminal.status,
+        reason: terminal.reason
+      })
       return r
     },
 

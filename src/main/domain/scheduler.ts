@@ -1,4 +1,5 @@
 import type { Turn } from '../../shared/entities.ts'
+import type { PushOf } from '../../shared/ipc/contract.ts'
 
 /**
  * 轮次调度器 —— §4.5 的两条不变量的**唯一**实现点。
@@ -57,6 +58,20 @@ export interface SchedulerOptions {
    */
   onRunCrashed(turnId: string, err: unknown): void
   onWarn(tag: string, message: string, detail?: unknown): void
+  /**
+   * ★ `stream:status` 的生产者（M6b 补上；此前是个**有 schema、有白名单、
+   * 有用例、零生产者**的死通道）。
+   *
+   * 调度器负责 `queued` 与 `running` 两个切换点，因为**它就是做这件事的那一方**：
+   * 前者是「交给队列」，后者紧跟 `markRunning` 的事务提交之后。
+   * 终态不在这里 —— 它属于合并终态与正文折叠的那个事务（`event-batcher.endTurn`），
+   * 以及 `turn:stop` 把 `queued` 翻成 `cancelled` 的那一处。
+   *
+   * ⚠️ **发的是「事实」，不是「意图」**：`running` 只在 `markRunning` **真的返回了行**
+   * 之后才发。写入失败那条分支（下面那个 `warn`）一帧都不该发出去 ——
+   * 否则界面会显示一个从来没开始过的轮次正在运行。
+   */
+  emitStatus(payload: PushOf<'stream:status'>): void
   /** 并发上限。默认 3（§2.3）。 */
   concurrency?: number
 }
@@ -181,6 +196,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     running.add(started.id)
     busySessions.add(started.sessionId)
 
+    // ★ 发的是**事实**：`markRunning` 真的返回了行，库里那一行现在就是 `running`。
+    // 上面那条早退分支（写不动）刻意不发 —— 那一轮从来没开始过。
+    // 顺序也是硬的：这条必须排在 `run()` 之前，否则界面会在「已经开始跑」
+    // 之后才收到「开始跑」。
+    opts.emitStatus({
+      workspaceId: started.workspaceId,
+      sessionId: started.sessionId,
+      turnId: started.id,
+      status: 'running',
+      reason: null
+    })
+
     // ★ 刻意不 `await`：`run()` 是长任务（可能几分钟），而这里必须**同步**把
     // 循环推完 —— 否则并发上限形同虚设（三个轮次会被串行地一个个启动）。
     void opts
@@ -212,6 +239,24 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         return
       }
       queue.add(turn.id)
+
+      /**
+       * ★ 先发 `queued`，**再** `pump()` —— 顺序是硬的。
+       *
+       * `pump()` 是同步的：只要还有槽位，它会在这次调用里就把这一轮派发掉，
+       * 于是紧接着发出 `running`。反过来的话，渲染层会先收到 `running`、
+       * 再收到 `queued`，界面上那一行会从「运行中」跳回「排队中」并永远停在那儿。
+       *
+       * `reason: null` 不是占位符：非终态本来就没有原因（schema 里这一列可空）。
+       */
+      opts.emitStatus({
+        workspaceId: turn.workspaceId,
+        sessionId: turn.sessionId,
+        turnId: turn.id,
+        status: 'queued',
+        reason: null
+      })
+
       pump()
     },
 

@@ -255,4 +255,19 @@ export function registerWorkspace(r: Registry, ctx: HandlerContext): void {
       exists: (await pathState(paths.root)).exists
     }
   })
+
+  /**
+   * ★ 累计用量（M6b，§5.4 的「成本常驻显示」）。
+   *
+   * 走**聚合读**而不是把 `turn:list` 加起来 —— 那条通道带 limit，用它求和会
+   * 「看起来完全正常，只在历史变长之后悄悄变小」。
+   *
+   * ⚠️ 空间不存在时**抛错，不返回零**：回一个 `costUsd: 0` 会让界面显示
+   * 「这个空间花了 0 元」，而正确的读法是「没有这个空间」。
+   * 一个不存在的空间和一个真的没花过钱的空间，不该长得一样。
+   */
+  r.handle('workspace:usage', ({ workspaceId }) => {
+    if (!repos.workspace.get(workspaceId)) throw new NotFoundError('工作空间', workspaceId)
+    return repos.turn.usageOfWorkspace(workspaceId)
+  })
 }

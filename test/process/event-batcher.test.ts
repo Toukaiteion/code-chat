@@ -20,6 +20,7 @@ import {
   FRAME_PAYLOAD_LIMIT,
   type Clock,
   type EventBatcher,
+  type StatusPayload,
   type StreamBatch,
   type UnreadPayload,
   type ViewLike
@@ -47,6 +48,16 @@ interface Rig {
   batches: StreamBatch[]
   unreads: UnreadPayload[]
   warns: Warn[]
+  /** 推送出去的每一次 `stream:status`，按发生顺序。 */
+  statuses: StatusPayload[]
+  /**
+   * 批次与状态推送的**共同**发生序（`'batch'` / `'status:completed'`……）。
+   *
+   * ★ 两个数组各记各的，谁也看不出「终态推送排在那批帧之后」——
+   * 而那条顺序是硬的（见 `endTurn` 里那段注释）：先发状态的话，渲染层会先丢掉
+   * 缓冲、再收到那一批帧，于是**重新建出一个不完整的缓冲**。
+   */
+  order: string[]
   /** 推进假时钟并**跑掉**期间到期的定时器。 */
   tick(ms: number): void
   /** 还有几个没触发的定时器（验「空闲不留计时器」）。 */
@@ -83,6 +94,8 @@ function rig(opts: { flushMs?: number; unreadMs?: number; maxFramesPerFlush?: nu
   const batches: StreamBatch[] = []
   const unreads: UnreadPayload[] = []
   const warns: Warn[] = []
+  const statuses: StatusPayload[] = []
+  const order: string[] = []
 
   let now = NOW
   const timers = new Map<number, { fn: () => void; ms: number }>()
@@ -119,8 +132,15 @@ function rig(opts: { flushMs?: number; unreadMs?: number; maxFramesPerFlush?: nu
     store: counted,
     clock,
     view,
-    emitBatch: (b) => batches.push(b),
+    emitBatch: (b) => {
+      batches.push(b)
+      order.push('batch')
+    },
     emitUnread: (u) => unreads.push(u),
+    emitStatus: (s) => {
+      statuses.push(s)
+      order.push(`status:${s.status}`)
+    },
     onWarn: (tag, message, detail) => warns.push({ tag, message, detail }),
     epoch: opts.epoch ?? 'epoch-1',
     ...(opts.flushMs !== undefined ? { flushMs: opts.flushMs } : {}),
@@ -147,6 +167,8 @@ function rig(opts: { flushMs?: number; unreadMs?: number; maxFramesPerFlush?: nu
     batches,
     unreads,
     warns,
+    statuses,
+    order,
     tick(ms) {
       now += ms
       for (const [h, t] of [...timers]) {
@@ -418,6 +440,7 @@ test('★ 先落库、后推送：推送发生的那一瞬间，行已经在库�
       }
     },
     emitUnread: () => {},
+    emitStatus: () => {},
     onWarn: () => {},
     epoch: 'e'
   })
@@ -468,6 +491,7 @@ test('落库失败时一个字节都不发 —— 宁可整轮失去，也不做
       throw new Error('落库失败时不该有推送')
     },
     emitUnread: () => {},
+    emitStatus: () => {},
     onWarn: (tag, message, detail) => warns.push({ tag, message, detail }),
     epoch: 'e'
   })
@@ -751,6 +775,31 @@ test('★ endTurn 把 done 帧与终态行放进同一个事务；之后库里�
   assert.ok(kinds(r).includes('done'))
 })
 
+test('★★ 终态推送排在那一批帧**之后** —— 反过来界面会重建出一个不完整的缓冲', () => {
+  // 顺序颠倒的后果不是「显示得慢一点」：渲染层收到终态会把缓冲丢掉、让历史行接管，
+  // 而紧接着到达的那一批帧又会**重新建出一个缓冲**（它非空），把一条正文已经完整的
+  // 历史行再次盖住 —— 盖出来的是只有尾巴那段文字的半个气泡。
+  const r = rig()
+  const t = r.begin()
+  r.batcher.push(t, { k: 'text_delta', block: 0, text: '完成了' })
+  end(r, t)
+
+  assert.equal(r.order[r.order.length - 1], 'status:done', '最后一条必须是终态推送')
+  assert.equal(r.order[r.order.length - 2], 'batch', '紧挨着它前面的必须是那一批帧')
+  assert.deepEqual(r.statuses, [
+    { workspaceId: WORKSPACE, sessionId: SESSION, turnId: t, status: 'done', reason: 'complete' }
+  ])
+})
+
+test('★ 终态推送带上**准确**的终态与原因（失败那一轮不许报成完成）', () => {
+  const r = rig()
+  const t = r.begin()
+  end(r, t, { reason: 'budget', status: 'failed', errorText: '撞上预算闸', exitCode: null })
+  assert.deepEqual(r.statuses, [
+    { workspaceId: WORKSPACE, sessionId: SESSION, turnId: t, status: 'failed', reason: 'budget' }
+  ])
+})
+
 test('中断：终态行写 interrupted，done 帧的 reason 也是 interrupted（同一个值）', () => {
   const r = rig()
   const t = r.begin()
@@ -781,6 +830,7 @@ test('★ 落库失败时终态行也必须写下去 —— 不许留下一条�
     view: { workspaceId: WORKSPACE },
     emitBatch: () => {},
     emitUnread: () => {},
+    emitStatus: () => {},
     onWarn: () => {},
     epoch: 'e'
   })
