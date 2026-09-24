@@ -65,7 +65,7 @@
 npm install          # 装 devDependencies（含 electron 本体）
 npm run dev          # electron-vite dev，热更新
 npm run build        # typecheck(node+web) + electron-vite build
-npm test             # 542 个用例，裸 Node，不碰网络不花钱
+npm test             # 587 个用例，裸 Node，不碰网络不花钱
 npm run typecheck    # 两个 tsconfig 各跑一遍 tsc --noEmit
 ```
 
@@ -80,11 +80,11 @@ npm run typecheck    # 两个 tsconfig 各跑一遍 tsc --noEmit
 | 命令 | 干什么 | 花费 |
 |---|---|---|
 | `npm run probe:m5` | 单轮真 CLI 探针（`--max-budget-usd 0.50`） | **会花钱** |
-| `npm run probe:m7a` | 三臂 stdin 形态探针（M7a）；`probe:m7a:dry` 只打印载荷与 argv | **会花钱** |
-| `npm run walk:m6a:dry` / `walk:m6b:dry` / `walk:m7a:dry` / `walk:m7b:dry` | 走查的**零成本**版本（假 CLI） | 0 |
-| `npm run walk:m6a` / `walk:m6b` / `walk:m7a` / `walk:m7b` | 真机走查，真 CLI | **会花钱** |
+| `npm run probe:m7a` | 四臂 stdin 形态探针（M7a）；`probe:m7a:dry` 只打印载荷与 argv | **会花钱** |
+| `npm run walk:m6a:dry` / `walk:m6b:dry` / `walk:m7a:dry` / `walk:m7b:dry` / `walk:m7c:dry` | 走查的**零成本**版本（假 CLI） | 0 |
+| `npm run walk:m6a` / `walk:m6b` / `walk:m7a` / `walk:m7b` / `walk:m7c` | 真机走查，真 CLI | **会花钱** |
 | `npm run walk:m6a:replay -- --archive=<dir>` | 拿既有归档**零成本重判** | 0 ⚠️ 漏掉 `--archive` 会花钱，见 §11.2 |
-| `npm run walk:m6b:replay` / `walk:m7a:replay` / `walk:m7b:replay` | 同上，但**没给 `--archive` 就直接报错退出**（M6b 起的形状） | 0 |
+| `npm run walk:m6b:replay` / `walk:m7a:replay` / `walk:m7b:replay` / `walk:m7c:replay` | 同上，但**没给 `--archive` 就直接报错退出**（M6b 起的形状） | 0 |
 
 > ★ M7b 走查的 `@` 扇出**最贵**（一轮 `@` 出去就是好几跳），所以它的 `--dry` 比别的更值钱。
 > 但它这一次**没有**抓到该抓的东西：那个「正文里多拼了一个 `@Echo`」（差 6 个字节）的脚本缺陷
@@ -169,6 +169,12 @@ renderer ──→ shared/ipc/contract ←── preload
   这三条里最贵的错**都是不报错的那种**：熔断早一跳或晚一跳都只是一个数字，
   去重基准取错会**静默地吃掉一次正当派发**（agent 会发现「说了但没被派」且无从得知为什么）。
   所以它们**一个字节都不写库**：给定「链上的跳」和「谁 @ 了谁」，判决是确定的、与进程状态无关的。
+- 提示词装配 / 压缩的判决与确定性摘要 → `domain/context-builder.ts` 与
+  `domain/compaction-service.ts`（M7a / M7c）。★ 后者的每一件事都是**不报错的那种**：
+  区间算错一条、累积时丢了上一段、超上限时删掉了该留的、判该压而不压 ——
+  没有一件会让任何东西变红，所以它们必须能被单测**逐条**钉住。
+  `compaction-service.ts` 与 `context-builder.ts` 是 `domain/` 里**唯二零 runtime import** 的文件
+  （连 `node:` 都不导）：判决要是需要读文件或取哈希才能做，它就已经不是判决了。
 
 `design.md` §4.6a 是这条纪律的正式表述：**「计算了但没渲染 = 缺陷」**，
 反过来同样成立 —— 一个要么会算错、要么会显示假的数字的判断，必须有一个能测的落点。
@@ -206,7 +212,11 @@ renderer ──→ shared/ipc/contract ←── preload
 ⑦ 装配 TurnContext（M7a 起：`context-builder.buildContext()`）                 │
    domain/turn-runner.ts: 读 actor/member/session → resolveTurnCwd（三级兜底）│
    → resolveAddDirs（可见项目） → buildContext() 出 systemPrompt + messages   │
-   （prelude + 会话历史；细节与 M7a 的文档收口一起写）                          │
+   ★ 装配四步：① 会话历史按 `compactedThroughSeq` **一刀切**（被挡的进 shape） │
+     ② prelude = `<env>` + `<project_context>` + `<summary?>`（**纯追加**的    │
+        `messages[0]`，第 N 轮逐字节是第 N+1 轮的前缀 —— 这是缓存论证的可执行形│
+        态）③ prelude 打头、历史逐条追加 ④ systemPrompt = 人设 + `<role>`       │
+   ★ 产物是**数组**，不是给 stdin 的行；拍平只发生在适配器最后一行代码上       │
    → batcher.beginTurn() → adapters.get(agentKind).run(ctx, signal)          │
                                                                              │
 ⑧ spawn CLI                                                                   │
@@ -239,7 +249,23 @@ renderer ──→ shared/ipc/contract ←── preload
    渲染层收 stream:status 终态 → ① 先把历史读回来 ② 再丢缓冲 ③ 记 recentlyFinished
 ```
 
-**⑬ 扇出（M7b）** —— 它排在 `batcher.endTurn()` **之后**，只在这条回复写了 `<mentions>` 块、
+**⑬ 压缩（M7c）** —— 同一个 `onTurnFinished` 缝，**排在扇出之前**：先把「过去」的账结掉，
+再开始「未来」的事（顺序今天不 load-bearing，见 §6.5.1，但它是写下来的）：
+
+```
+turn-runner 收尾 ──onTurnFinished(turn)──→ process/compaction.ts（全同步、整个函数一个 try/catch）
+  ① 触发消息 / 会话 / 成员 / actor 缺失 → warn + return（库不一致，**不抛**）
+  ② lastBefore = message.lastSeqBefore(session.id, 触发消息.seq)   ← 区间右端的唯一来源
+  ③ pending = message.listBySessionBetween(会话, 水位线, 触发消息.seq, 500)（撞上限 → warn）
+  ④ domain/compaction-service.shouldCompact(facts, limits) → 压不压 / 压到哪
+     ★ `throughSeq` 只能**回显**（通过 = lastBefore、否决 = 现有水位线），绝不许重算
+  ⑤ 该压 → 一个事务写三样：session.setCompaction（**权威**水位线 + 摘要文本）
+     → message.markCompactedBySession（**冗余诊断**：逐条 inject_mode='summary'）
+     → 落一条 `role:'system'` 的折叠说明行（★ **不带 turnId**）
+  ⑥ CLI 自己的压缩信号要不要露面（`interpretCompactResult`）—— 无论露不露面**都进日志**
+```
+
+**⑭ 扇出（M7b）** —— 也只在这条回复写了 `<mentions>` 块、
 或用户那条消息真的 `@` 了人时才有事发生：
 
 ```
@@ -250,7 +276,13 @@ turn-runner 收尾 ──onTurnFinished(turn, {mentions, hadWork})──→ proc
   `cc` 只做第 ③ 步的前半：写一行 `role: 'user'` 的历史行，**不建轮次**
 ```
 
-**这条链上有五个「顺序是硬的」的地方**，每一处错了都不会报错、只会让界面不对：
+★ 压缩的效果**不在这一轮看得见** —— 它写的是「下一轮装配读什么」。
+所以它的正确性只能由两条**互相独立**的事实合判：下一轮 `shape` 里的
+`summaryChars` / `compactedThroughSeq` / `historyIncluded`，**加上**库里那条会话行的
+水位线与逐条 `inject_mode`。**界面看起来对**在这里一个字节都不证明（design.md §七）。
+
+**这条链上有六个「顺序是硬的」的地方**，每一处错了都不会报错、只会让界面不对
+（★ 第六条是**唯一的例外**：它今天不重要，写下来正是为了让它不要在将来被顺手挪掉）：
 
 1. **`enqueue()` 先 emit `queued` 再 `pump()`。** 反过来的话，一个瞬间就起跑的轮次
    会先收到 `running` 再收到 `queued`，而渲染层按状态覆盖 —— 界面显示「排队中」。
@@ -264,6 +296,13 @@ turn-runner 收尾 ──onTurnFinished(turn, {mentions, hadWork})──→ proc
    先扇出就会读到「这一轮还没有回复」的库 —— 症状是**它的 `@` 全都不生效**，
    而每一处都不报错。同一条纪律的另一面：取消排队的三步（库 → 内存 → 推送）
    照抄 `turn:stop`，**顺序也不许调**。
+6. ★ **压缩排在扇出之前**（M7c）—— 同一个 `onTurnFinished` 缝上的两个钩子。
+   ⚠️ **诚实说：这一条今天不是 load-bearing 的。** 压缩读的是「这一轮结束时的库」，
+   扇出写的是「新的轮次」，而 §4.5a 规则一保证同一会话不会并起第二轮，
+   所以两者即便互换也不会有人在压缩还没落库时去读那条水位线。
+   **写下来是因为它是语义顺序**（先结过去的账，再开始未来的事），
+   而且正因为它今天不 load-bearing，一个「顺手挪一下」的改动不会红任何测试 ——
+   等到某天它重要了，那改动早已进库（§6.5.1）。
 
 ---
 
@@ -689,7 +728,11 @@ CLI 到底用哪些 subtype 报「超预算」和「被中断」，**尚无实�
 > 再被 `turn-runner` 装配）—— 而**剔除 cwd 那一份**的规则住在 `context-builder`，
 > **不在这个文件里**：`project-context.ts` 的职责是「如实收全」，一个字节没改（§8.5c）。
 > 条目里那些纪律仍然有效，只是它们现在**有调用方了**。
-> ⚠️ 更细的接线（含 cwd 那份 `CLAUDE.md` 到底怎么处理、走查结论）**与 M7a 的文档收口一起写**。
+> ★ **cwd 那份 `CLAUDE.md` 的处理现在有定论了**（M7a 已收口）：`<cwd>/CLAUDE.md` 与
+> `<cwd>/.claude/CLAUDE.md` **都不进**我们拼的 `<project_context>` —— CLI 自己会把它们带进去
+> （判据是**行类型**：标记首次出现在 `assistant` 行、之前没有 `tool_result`）。
+> 规则住在 `context-builder.ts` 的 `AUTO_INJECTED_FROM_CWD`，**不在这个文件里**；
+> 四条实测与「代价不对称」的论证见 design.md §8.5c-1 与 §6.4.6。
 
 它自己的四条纪律（M7a 起被真正用到）：
 
@@ -708,16 +751,18 @@ CLI 到底用哪些 subtype 报「超预算」和「被中断」，**尚无实�
 ### 6.4 `domain/` —— 业务规则（不认识 electron / sqlite）
 
 ```
-scheduler.ts (309)       队列、并发槽位、启动清扫
-turn-runner.ts (578)     跑一轮：装配上下文 → 驱动适配器 → 喂合批器 → 收尾 → 扇出
-turn-cwd.ts (104)        cwd 三级兜底（纯函数）
-tool-diff.ts (164)       file_diff 的合成器（format 的所有者）
-mention-service.ts (571) 三条熔断 + 跳数记账 + 转述正文（纯判断，不写库）
+scheduler.ts (309)          队列、并发槽位、启动清扫
+turn-runner.ts (567)        跑一轮：装配上下文 → 驱动适配器 → 喂合批器 → 收尾 → 扇出
+turn-cwd.ts (104)           cwd 三级兜底（纯函数）
+tool-diff.ts (164)          file_diff 的合成器（format 的所有者）
+mention-service.ts (571)    三条熔断 + 跳数记账 + 转述正文（纯判断，不写库）
+context-builder.ts (660)    ★ 提示词装配：系统提示词 + 历史数组 + <summary>（零运行时导入）
+compaction-service.ts (492) ★ 压缩的**判决**与确定性摘要（零运行时导入）
 ```
 
-> `context-builder.ts`（M7a，607 行）与 `compaction-service.ts`（M7c）的条目排在后面，
-> 与各自的文档收口一起写 —— 这一段的位置说明**它们的条目还没落定**，
-> 别读成「装配层没有这个东西」（代码已经在了，见 §4 的 ⑦ 与 design.md §4.6）。
+★ 后两个是**七块里唯二「零运行时导入」**的（`context-builder.ts` 连 `node:` 都不导，
+`compaction-service.ts` 只 `import type`）—— 见 §3.1 规则三。
+它们的条目在 §6.4.6 / §6.4.7。
 
 #### 6.4.1 `scheduler.ts`
 
@@ -897,13 +942,104 @@ workspace.active_project_id        →  该项目的 root_path   ← 空间「�
 3. **`fanoutOf` 不因成员数而拒绝**（§4.5b 第 3 条：广播不单独设机制）——
    文件头那段抄写就是用来拦住下一个「要不要给广播加个上限」的人的。
 
+#### 6.4.6 `context-builder.ts`：把「一轮要发出去的东西」算出来
+
+**它是 M7a 的产物，而它的**形状**是**被实测改过的**。** 原设计（design.md §4.6）打算「历史逐条传递」，
+理由是「prefix 缓存以消息为界」。M7a 探针把这条**推翻了**：stdin 内层 `role` 只能是 `'user'`
+（`assistant` / `system` 在**解析 stdin 阶段**就被拒），而多条 user 行**不是**「一轮的多条消息」——
+3 行给出 **2 条 `result`**，切在 `1 | {2,3}`（design.md §六「M7a 实证」有逐条读数）。
+
+⇒ 所以它的产物**不是给 stdin 的行**，而是 `TurnContext.messages` 那个数组；
+由 `claude-adapter` 用 `renderTurnInput()` 拍平、包成**恰好一行**写出去。
+**数组留在 `TurnContext` 上是刻意的**：它是层间的编码，不是线上格式，拍平只发生在最后一行代码上。
+
+**四次装配，按顺序**（`buildContext()` 一个函数里四段，注释里编了号）：
+
+1. **历史：水位线一刀切。** `seq <= session.compactedThroughSeq` 的整段跳过（★ 水位线是**权威**）；
+   `inject_mode === 'excluded'` 的另外跳过（它与水位线无关 —— 「这一条无论如何都不进」）；
+   空白正文也跳过。**只有前两者进 `shape` 的计数**（`historySuppressed` / `historyExcluded`）。
+2. **前缀 `prelude`：`<env>` + `<project_context>` + `<summary?>`**，
+   用 `\n\n` 拼成 `messages[0]`。★ 它是 **prelude，不是一条历史消息** ——
+   数组因此天然「纯追加」：第 N+1 轮只在尾部 push，前缀一个字节都不动。
+   `<summary>` 只有在 `through > 0` **且**摘要在位时才出现；`through > 0` 而摘要为空 ⇒
+   记一条 `compaction-summary-missing`（**如实报，不假装没压过**）。
+3. **正文**：`[prelude, ...历史逐条]`。
+4. **系统提示词**：人设 + 角色描述（`<role>` 整块，`roleDescBytes === null` 时**不出现**，不是空标签）。
+
+**两个必须记下来的所有关系**：
+
+- **`<summary>` 那句说明的条数由摘要自己给**，不由装配层拼。M7c 之前这里自己拼过一句，
+  而它数的是 `suppressedByWatermark`（**本窗口内**被挡的条数，窗口上限 200），
+  却被写成「seq ≤ N 的 X 条消息」—— 长会话下会把 500 条说成 200 条，且与摘要正文**同场矛盾**。
+  M7a 那会儿 `through > 0` 在生产里不可达，所以它**没有机会撒谎**；
+  **一个事实只有一个所有者**，装配层只负责包 `<summary>` 标签。
+- **`AUTO_INJECTED_FROM_CWD` 是两元的 `Set`**（`CLAUDE.md` 与 `.claude/CLAUDE.md`）：
+  这两个**不进**我们拼的 `<project_context>`，因为 CLI 自己会把它们带进去（判据是行类型，
+  四条实测见 design.md §8.5c-1）。**只剔根那一份就仍是两遍**，两个都剔才对。
+
+**它的三条纪律**（照 `turn-cwd.ts` 的先例）：
+
+1. **零 runtime import** —— 连 `renderTurnInput` 都不 import。理由不是洁癖，是**标签的所有权必须唯一**：
+   `【你上一轮的回答】` 归 `renderTurnInput`，`【作者】/【系统】/【用户】/【我】` 归本模块的
+   `historyLabelOf()`。两边各加一份，就会出现「一条历史行上有两个角色标记」。
+   ★ 摘要里的标签**必须复用这一个函数**，否则模型在摘要里读 `【我】`、在历史里读 `【Atlas】`。
+2. **不抛错**：一切处境进 `notes`。「这是不是致命」的判决留给 `turn-runner`（它才有 `fail()` 出口）。
+3. **不碰盘**：读文件一律走注入的 `deps`，因为**单测不该碰真文件系统**
+   （「第 1 个缺失、第 2 个超限」要能直接构造）。
+
+**`ContextShape` 是对外唯一的观测面**（`onContextBuilt` 把它写成主进程的一行 `console.log`）。
+★ 里面两格是**直接观测**而不是推断：`summaryChars`（`<summary>` 块实际贡献的字符数，没注入 = 0）
+与 `suppressedAutoInjected`。用 `compactedThroughSeq > 0` 去推「块在位」是**弱判据** ——
+水位线为真而块被跳过时，它一个字都不会说。
+
+#### 6.4.7 `compaction-service.ts`：压缩的判决 + 确定性摘要
+
+**为什么它必须是一个独立文件**：压缩的**每一件事都是「错了不报错」的** ——
+区间算错一条、累积时丢了上一段、超上限时删掉了该留的、判该压而不压 ——
+没有一件会让任何东西变红。所以判决全在这一个文件里，**可以被单测逐条钉住**（§3.1 规则三）。
+
+**★ 它一个 infra 都不 `import`（连 `import type` 都在 `shared/` 与 `context-builder` 上）。**
+`domain/` 下没有**取值**导入 `infra/` 的先例；摘要不做哈希（那是调用方的活）、不读文件，
+所以这里连一个都不需要。**这不是巧合，是 `domain/` 那条边界的可执行形态**：
+判决要是需要读文件才能做，它就已经不是判决了。
+
+**三件设施**：
+
+| 设施 | 它判什么 |
+|---|---|
+| `shouldCompact(facts, limits)` | **压不压**、**压到哪**。`CompactReason` 四值：`count-threshold` / `char-ceiling` / `below-threshold` / `nothing-to-fold` |
+| `appendToRollingSummary({prev, entries, …})` | **摘要文本**（累积、剥标题、超限从中间删 + in-band 声明） |
+| `interpretCompactResult(ours, cli)` | **CLI 自己的压缩信号要不要露面**（`compact_boundary` → warning；`failed` 要与**我们自己的判决**合判，`too_few_groups` 是正常） |
+
+**★ 它只能回显、不许重算的那一格**：`CompactDecision.throughSeq`
+（通过 = 传进来的 `lastBeforeTriggerSeq`，否决 = 现有水位线）。
+**区间右端的所有者是那条 SQL**（`seq < ?` 是「不含本轮触发消息」的唯一实现）——
+纯函数自己算 `triggerSeq - 1` 会**看起来一样**，直到出现软删除行或 `seq` 缺口。
+
+**★ 摘要必须累积**：`prev`（上一轮的 `rolling_summary`）**逐字携带**，
+否则第二次压缩会把最早那段历史**静默吃掉**。四条纪律：
+① 剥标题按**本模块自己拥有的常量**做精确切片（`TITLE_OPEN` / `TITLE_MID` / `TITLE_TAIL`，
+**不用正则**，也**不许**顺手 trim 掉别的东西）；
+② 剥不掉就**逐字携带**并记 `compaction-prev-summary-unparsed` —— 这条降级路径只损失标签，**绝不丢字**；
+③ 超上限时**从中间删、保留首尾**，并在删除处插一行 in-band 声明；
+④ **声明行永远不许被删**（上限小到荒谬时返回「标题 + 声明」）。
+口径是**丢失可以发生，但必须自己说出来** —— 而「自己说出来」的意思是写进**摘要文本本身**，
+不是写进日志：**模型读不到日志**。
+
+**★ 那两个阈值常量是估算**（`DEFAULT_COMPACT_CHAR_CEILING = 400_000` /
+`COMPACT_READ_LIMIT = 500`），注释里写着这件事。★ 其中字符上限尤其要知道自己的量级：
+`ENTRY_MAX_CHARS = 200` × 500 条读取上限 ≈ **10 万字符**，所以 40 万这个数
+**在当前的读取上限下不可达** —— 它是给「上限被调大之后」留的闸，不是今天的常识。
+**不许**因为「看起来太大」就顺手调小（design.md §8.9-22）。
+
 ### 6.5 `process/` —— 运行时管道
 
 ```
 child-registry.ts (300)  活子进程登记处 + 中断阶梯（唯一实现）
 event-batcher.ts (1123)  ★ 最大也最核心：帧的分配、合批、落库、推送、重放、抑制
-runtime.ts (268)         ★ 唯一的装配点（也是唯一的管道入口）
+runtime.ts (438)         ★ 唯一的装配点（也是唯一的管道入口）
 fanout.ts (527)          `@` 扇出的执行侧：验成员 → 去重 → 转述 → 建轮次/取消排队
+compaction.ts (295)      压缩的执行侧：算区间 → 一个事务写水位线与逐条标记 → 落一条可见的 system 行
 ```
 
 #### 6.5.1 `runtime.ts`：为什么是三个具体回调而不是一个泛化的 Registry
@@ -920,6 +1056,31 @@ emitStatus  // → transport.send('stream:status', …)
 文件头解释了为什么不用一个泛化的 `Registry`：为了让**注册表 ↔ 运行时**这个循环
 在类型上可见。（合批器需要回调，而回调需要合批器的 store ——
 用三个具体回调比用一个对象更容易看清这个环。）
+
+**`onTurnFinished` 缝上现在是两个钩子，顺序是硬的：压缩在扇出之前。**
+
+```ts
+onTurnFinished: (turn, info) => {
+  compaction.onTurnFinished(turn)     // ① 先把「过去」的账结掉
+  fanout.onTurnFinished(turn, info)   // ② 再开始「未来」的事
+}
+```
+
+★ **诚实记一句：今天这个顺序**不是 load-bearing 的**。** §4.5a 规则一（同一会话不会并起第二轮）
+保证了这两个钩子即便互换，也不会有人在压缩还没落库时去读那条水位线。
+**正因如此才更要写下来** —— 一个「今天不重要、看起来也不重要」的顺序，
+会在某一天被一个「顺手挪一下」的改动改掉，而那一天它可能已经重要了。
+★ 两处接线差异值得对照：`fanout` 那套是「箭头函数闭包读、运行时求值」的绕法（因为它与
+`scheduler` 有环），**`compaction` 没有环**（它不碰调度器），所以**不要**照抄那层延迟。
+
+★★ **这个钩子绝不许抛。** 整个函数体是一个 `try/catch`，任何异常只降级成一条 warn。
+理由不是「稳健性原则」，是**它的坏法没有信号**：它抛出去会变成调度器的一条 `run-crashed`，
+而**压缩从此再也不会发生** —— 一个坏掉的压缩与一个「还没到阈值」的压缩，在库里、界面上、
+日志里**长得一模一样**（design.md §8.8i 规则一）。
+
+**它只收一个参数**（`onTurnFinished(turn)`）：压缩要的东西**全在库里**
+（会话行的水位线与摘要、`seq` 区间、成员）。这不是省事 —— 是让「压缩的输入是**持久化事实**」
+这件事在签名上就成立，而不是靠调用方把内存里的状态递进来。
 
 `batcherStoreOf(store)` 是**导出**的，好让测试共用**同一个生产用窄口**，
 而不是各写一份。
@@ -1630,18 +1791,24 @@ errcode **2067 / 1555 / 787** 映射成 `E_CONFLICT` / `E_CONFLICT` / `E_FK_MISS
 
 ## 11. 测试与走查
 
-### 11.1 `npm test` —— 542 个用例，8.4 秒，零成本
+### 11.1 `npm test` —— 587 个用例，10.0 秒，零成本
 
 ```
 test/adapter/   claude-adapter(344) cli-locator(160) project-context(241) stream-json-parser(757)
-test/domain/    context-builder(450) mention-service(451) scheduler(473) tool-diff(188) turn-cwd(145)
+test/domain/    compaction-service(398) context-builder(501) mention-service(451)
+                scheduler(473) tool-diff(188) turn-cwd(145)
 test/infra/     text-file(165)
 test/ipc/       delete(344) errors(188) import(449) registry(538) schemas(192)
-                space-dir(157) turn(552) workspace-dir(194) helpers(477)
-test/persist/   migrations(181) repositories(744) schema(382) turn-usage(204)
-test/process/   child-registry(375) event-batcher(1033) fanout(682)
+                space-dir(157) turn(644) workspace-dir(194) helpers(477)
+test/persist/   migrations(181) repositories(922) schema(382) turn-usage(204)
+test/process/   child-registry(375) compaction(441) event-batcher(1033) fanout(682)
 test/shared/    frame-buffer(338) history(286) patch-lines(79) timeline(174) watermark(399)
 ```
+
+★ `test/domain/compaction-service.test.ts` 与 `test/process/compaction.test.ts`（M7c）
+是「**每一件事都不报错**」那类判决的落点：累积有没有吃掉上一段、超上限时删的是不是中间的、
+区间右端有没有含进本轮触发消息、`excluded` 的行会不会被悄悄折回去 ——
+它们全都**不可能**从界面或库里「看出来」，所以只能在这里被逐条钉死（§3.1 规则三）。
 
 **这套测试靠三件事才跑得起来**（新写测试时会用到）：
 
@@ -1667,6 +1834,10 @@ test/shared/    frame-buffer(338) history(286) patch-lines(79) timeline(174) wat
 | `scripts/m5-probe.ts` | 1096 | **真 CLI 探针**（会花钱，`--max-budget-usd 0.50` 硬闸） |
 | `scripts/m6a-pipeline-walkthrough.ts` | 1579 | 主进程管道（零界面） |
 | `scripts/m6b-walkthrough.ts` | 2774 | 流式对话界面（五个场景，两轮真 CLI） |
+| `scripts/m7a-probe.ts` | 1087 | **四臂 stdin 形态探针**（会花钱）：内层 `role` / 多条 user 行 / 自动注入补测 |
+| `scripts/m7a-walkthrough.ts` | 2260 | 上下文装配（两轮真 CLI）：第 2 轮记不记得第 1 轮 |
+| `scripts/m7b-walkthrough.ts` | 2843 | `@` 派发与三条熔断（★ 最贵：一轮 `@` 出去就是好几跳） |
+| `scripts/m7c-walkthrough.ts` | 2242 | 压缩（三轮真 CLI）：判决 → 写库 → **下一轮装配** |
 | `scripts/check-page-helpers.cjs` | 69 | 见下 |
 
 **★ `check:helpers` 为什么必须存在**：这看起来像个边角料，其实是个真陷阱 ——
@@ -1687,7 +1858,13 @@ test/shared/    frame-buffer(338) history(286) patch-lines(79) timeline(174) wat
 - `walk:m6a:replay` **就是** `walk:m6a` 本身 —— 漏掉 `--archive=<目录>` 时
   它会照常跑一次真 CLI（**花钱**）。
 - `walk:m6b:replay` 没有 `--archive` 时**直接报错退出**，不采集。
-- M7a / M7b 的走查**照抄了 M6b 那一种**（有一道 `REPLAY_ONLY && !archive` 的守卫）。
+- M7a / M7b / M7c 的走查**照抄了 M6b 那一种**（有一道 `REPLAY_ONLY && !archive` 的守卫）。
+
+★ **有一种事实只能用「走查的零成本那一半」取证：源码里的接线顺序。**
+`walk:m7c:dry` 里有一处 `staticWiringCheck()` —— 读 `runtime.ts` 与 `main/index.ts`，
+断言 `compaction.onTurnFinished(t)` **排在** `fanout.onTurnFinished(t, info)` 之前。
+那两行互换**不会红任何测试**（§4.5a 规则一保证同会话不会并起第二轮），
+所以在测试与真机读数里都没有它的痕迹 —— **只能读源码**（design.md §8.8i 一）。
 
 M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 replay 的命令在打错字时花钱，
 是这把枪自己走火。」
@@ -1715,13 +1892,14 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 | M6a | **主进程管道**：调度器 + 执行器 + 合批器 + 落库 + `turn:send`/`stream:resume` + `file_diff`，**零新界面** | `5f1c6c8` |
 | M6b | **流式对话界面**：`live` slice + 流式渲染 + 历史重放 + 成本常驻 + `stream:status` 的生产者 | `ea3d546` |
 | （文档） | README + 本文档（面向新人的实现走读） | `bafb4de` |
-| M7a | **`context-builder`**：历史数组化 + `systemPrompt` + 两件未实测事实的探针（2026-09-23 落地；commit 未做） | — |
-| M7b | **`@` 派发 + 跳数记账 + 三条熔断**：`mention-service.ts` / `process/fanout.ts`（2026-09-24 落地；commit 未做） | — |
-| **M7c**（下一个） | **压缩**：`compaction-service.ts` + 阈值 + 确定性摘要 + `inject_mode` 的消费 | — |
+| M7a | **`context-builder`**：历史数组化 + `systemPrompt` + 两件未实测事实的探针（2026-09-23 落地） | `e5fb051` |
+| M7b | **`@` 派发 + 跳数记账 + 三条熔断**：`mention-service.ts` / `process/fanout.ts`（2026-09-24 落地） | `e5fb051` |
+| **M7c** | **压缩**：`compaction-service.ts` + 阈值 + 确定性摘要 + `inject_mode` 的消费（2026-09-24 落地） | （未提交） |
 | M8–M11 | 见 `design.md` §六 | — |
 
-> commit 列空着不是遗漏：本仓库的约定是**用户开口才提交**，
-> 而 M7 被切成三块、每块一个 commit（`design.md` §六）。
+> commit 列不是每行一个：本仓库的约定是**用户开口才提交**，且 M7a 与 M7b
+> **咬在一起、拆不干净，于是如实合成一个 commit**（`e5fb051`，已推 `origin/master`）——
+> 这一点写在 `design.md` §六的里程碑表里，不编一个不存在的分界。
 
 **M6b 末列的三件已知债，现状**（来源都在代码注释里）：
 
@@ -1729,11 +1907,14 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
    → **M7a 已闭合**（`buildContext` 接进 `turn-runner`）。
 2. ~~**`@` 派发**：`Composer` 的成员是**选**的，不从文本解析~~ → **M7b 已闭合**
    （用户侧仍是**选**的，那是设计；agent 侧从 `<mentions>` 块解析，§3.1a）。
-3. **`renderTurnInput` 的临时实现**（往 stdin 只写一条 user 消息）：
-   注释逐字写着「**M5 这一处是暂时违反 §4.6 的，不是满足它。** 记进待办，
-   别让它安静地变成 M7 的既成事实。」—— 它的结论属于 **M7a 的验收**（design.md §4.4e
-   与 §8.9-19：CLI 的 stream-json 输入到底接受不接受多条消息），
-   **与 M7a 的文档收口一起写**。这一行的位置说明那个结论还没落定。
+3. ~~**`renderTurnInput` 的临时实现**（往 stdin 只写一条 user 消息）~~
+   → **M7a 已闭合，而结论与原来设想的不一样**：`assistant` / `system` 内层 role 会被**直接拒**，
+   而多条 `user` 行会被**接受成多轮**（3 行 → 2 条 `result`，切在 `1 | {2,3}`）——
+   **比拒绝严重得多**，因为现成代码会把后面的 `result` 掐掉、症状只是「一轮变成一条更短的消息」。
+   所以「往 stdin 只写一条」**不是临时实现，而是唯一正确的形状**
+   （四臂读数见 `design.md` §六「M7a 实证」）。
+   那段注释里「别让它安静地变成 M7 的既成事实」的告诫**没有白写**：
+   它逼出了一个探针，而那个探针把设计文档推翻了（§8.8g 一）。
 
 ---
 
@@ -1811,8 +1992,23 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
   已知的边界见 §14.4 与 design.md §4.5b-1。
 - ~~**第二轮不记得第一轮** / **不做历史上下文拼接** / **`collectProjectContext` 零生产调用**~~
   ✅ **M7a 已落地**（2026-09-23）：`turn-runner` 现在调 `context-builder.buildContext()`，
-  装配细节（含 cwd 的 `CLAUDE.md` 怎么处理、走查结论）**与 M7a 的文档收口一起写**。
-  这一行的位置说明那一段还没落定 —— 别读成「装配层还不存在」。
+  装配细节在 §6.4.6，cwd 的 `CLAUDE.md` 的处理在 §6.4.6 与 design.md §8.5c-1（四条实测），
+  端到端读数在 design.md §六「M7a 实证」。
+- **`inject_mode = 'excluded'` 没有生产者**（M7c 的诚实一条）。装配层**已经在读**它
+  （`context-builder.ts` 里那条 `h.injectMode === 'excluded'` 跳过），压缩层也**已经避开**它
+  （`listBySessionBetween` 的 `inject_mode <> 'excluded'` 谓词、`markCompactedBySession` 的
+  `AND inject_mode = 'full'`）—— 但**没有任何地方会把它写成 `'excluded'`**。
+  它是给「用户手动排除某条消息」留的，那个界面属于后面的里程碑。
+  保留它而不是删掉的理由：删掉唯一的写方，那三处**读**就永远不可达 ——
+  那是「计算了但没渲染」的镜像，而且是一个**看起来像在守着一件事、其实什么都没守**的分支。
+- **`compact_boundary` / `compact_result` 没有真机证据**（M7c）。M7c 的走查里这两个
+  CLI 自己的压缩信号**一次都没出现**，而且**预判就是如此**（算术的：我们阈值 2 条、
+  CLI 的以万级 token 计，我们永远先压）。所以「CLI 压缩时我们怎么反应」这条路径
+  **只有单测覆盖**，`interpretCompactResult` 的四行露面表（design.md §8.9-14）
+  是它的全部依据。★ **不许**为了让信号露面去调参数（design.md §8.9-13）。
+- **四条 `project-context` 路径仍是「明知的未知」**：`.claude/rules/*.md`、`.cursorrules`、
+  `.cursor/rules/*`、`.github/copilot-instructions.md` 的自动注入行为**没有实测**，
+  因此按「多注入」那一侧兜底（代价可恢复 / 不可恢复的不对称，§6.4.6）。
 - **`codex` 没有适配器**：`registry.ts` 的表里是 `null`，调用方会得到一句人话。
 - **`AGENT_ERROR_CODES` 里 4 个码零生产点**（`protocol` / `parse` / `budget_exceeded` /
   `aborted`，见 §7.1）。
@@ -1836,6 +2032,22 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 - **在途轮次的排序是一个已知的粗略**：多个成员同时跑时，先后按「谁先被建起缓冲」定，
   不是任何数据库里的序号。落定后按 `message.seq` 归位。
 - **贴底跟随刻意做得粗**：30Hz 精确跟随是后面里程碑的事。
+- **压缩是「模型视角有损」的**（M7c）。折叠之后，**模型**看到的是确定性摘要
+  （每条 `[seq] 说话人 正文首段`，正文上限 200 字），**原文不再进它的上下文**；
+  而原文**一行都没删**（压缩只写 `inject_mode`，`deleted_at` 保持 `NULL`）。
+  ⇒ 这份损失**不是数据损失，是视角损失** —— 界面与库里都还完整，
+  只有模型不再看得到。★ 这一条必须写在有损这栏里，否则「压缩」看起来像个纯优化。
+- **摘要超过上限时，中间的骨架会被丢掉**（M7c）。删法是**从中间删、保留首尾**，
+  并在删除处插一行 **in-band 声明**（`…（此处省略了 N 条较早的骨架 —— 原文不在你的上下文里，
+  它们也不在本摘要里）…`）。口径是**丢失可以发生，但必须自己说出来**，
+  而「说出来」是写进**摘要文本本身**（模型读不到日志）。**声明行永远不许被删**。
+- **压缩只在轮末发生**（M7c）。一轮之内不会中途压 —— 长工具轮的上下文峰值它管不着。
+- **压缩的区间在软删除的行前面会停住**（M7c）。`lastSeqBefore` 取的是
+  `MAX(seq) WHERE deleted_at IS NULL AND seq < ?` —— 一条软删除的行**既不会被折、
+  也不会被标**（另外两条 SQL 也都带 `deleted_at IS NULL`），而水位线会停在它**之前**那一格。
+  今天的写方没有一个是软删（压缩只写 `inject_mode`，`deleted_at` 一律保持 `NULL`），
+  所以这条路径**在生产里不可达**；把它写下来是因为它是**一条真实的依赖**：
+  将来谁加了软删除，压缩的区间会跟着变，而变的方式在界面上**看不出来**。
 
 ### 14.5 边界声明（⚠️ 措辞纪律）
 
@@ -1875,6 +2087,22 @@ M6b 把默认反过来不是洁癖，理由逐字记在脚本里：「一个叫 
 而同一次发送里 **Nyx 拿到了 2 条转述 / 2 条轮次** —— 因为它第一轮已经不在 `queued` 尾部
 （在跑或已结束），于是**照样被派**。这正是 §4.5b 第 2 条的「已经执行过 ⇒ 可以再派」，
 **实测到的**，不是只在单测里构造的。
+
+**M7c 的形态又不同，而且它的留白最容易被读错**：它的 `--dry` **证明力是有限的**。
+零成本那一半能证明两件事 —— **静态接线**（`compaction.onTurnFinished(t)` 排在
+`fanout.onTurnFinished(t, info)` 之前；那两行互换**不会红任何测试**，只能读源码断言）
+与**旋钮真的被应用读到了**（刻意喂一个非法值，主进程 stderr 里出现
+`[compaction] … 不是一个正整数 …` —— ★ **有效值不产生任何输出**，所以没有这一枪时
+「设了但没人读」与「设了且被采纳」**长得一模一样**）。
+它**不能**证明压缩的判断对 —— **那只有真跑才露出**。
+
+⇒ 所以压缩的验收形态是一句纪律（design.md §七）：
+**只能由两条_互相独立_的事实合判** —— ① 下一轮 `shape` 里的
+`summaryChars` / `compactedThroughSeq` / `historyIncluded`；
+② 库里那张会话行的水位线与逐条 `inject_mode`。
+**「界面看起来对」在这里一个字节都不证明**：库里写了而装配没读，界面**完全正常**
+（历史照样全量注入，只是变长）；装配读了而库里没写，也不报错（读侧只认水位线，
+水位线永远是那个「落后但合法」的旧值）。
 
 ---
 

@@ -1,0 +1,64 @@
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/6613afde-f109-4186-8546-f2636de26e1b
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'ed04dac8-45ca-4539-82e2-101e5d6d44ce', sample: undefined }
+[runtime:compaction:decided] 压缩判决：nothing-to-fold {
+  turnId: 'ed04dac8-45ca-4539-82e2-101e5d6d44ce',
+  sessionId: '95a7484c-2cf3-49df-90eb-726eeae7e136',
+  reason: 'nothing-to-fold',
+  compact: false,
+  throughSeq: 0,
+  waterline: 0,
+  triggerSeq: 1,
+  lastBeforeTriggerSeq: null,
+  pendingCount: 0,
+  pendingChars: 0,
+  limits: { compactAtCount: 2, compactAtChars: 400000, summaryMaxChars: 4000 }
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'e5abef89-ae7f-48c8-bba1-8552ea246657', sample: undefined }
+[runtime:compaction:decided] 压缩判决：count-threshold {
+  turnId: 'e5abef89-ae7f-48c8-bba1-8552ea246657',
+  sessionId: '95a7484c-2cf3-49df-90eb-726eeae7e136',
+  reason: 'count-threshold',
+  compact: true,
+  throughSeq: 2,
+  waterline: 0,
+  triggerSeq: 3,
+  lastBeforeTriggerSeq: 2,
+  pendingCount: 2,
+  pendingChars: 42,
+  limits: { compactAtCount: 2, compactAtChars: 400000, summaryMaxChars: 4000 }
+}
+[runtime:compaction:compacted] 已折叠 2 条骨架，水位线推到 2 {
+  turnId: 'e5abef89-ae7f-48c8-bba1-8552ea246657',
+  sessionId: '95a7484c-2cf3-49df-90eb-726eeae7e136',
+  throughSeq: 2,
+  folded: 2,
+  kept: 2,
+  prevLines: 0,
+  chars: 126,
+  truncated: false
+}
+[runtime:adapter-diag:result-subtype] info: 终态 subtype = success { turnId: 'adc43b81-475f-4586-ac59-c3dd3e6c0dc4', sample: undefined }
+[runtime:compaction:decided] 压缩判决：count-threshold {
+  turnId: 'adc43b81-475f-4586-ac59-c3dd3e6c0dc4',
+  sessionId: '95a7484c-2cf3-49df-90eb-726eeae7e136',
+  reason: 'count-threshold',
+  compact: true,
+  throughSeq: 5,
+  waterline: 2,
+  triggerSeq: 6,
+  lastBeforeTriggerSeq: 5,
+  pendingCount: 3,
+  pendingChars: 88,
+  limits: { compactAtCount: 2, compactAtChars: 400000, summaryMaxChars: 4000 }
+}
+[runtime:compaction:compacted] 已折叠 3 条骨架，水位线推到 5 {
+  turnId: 'adc43b81-475f-4586-ac59-c3dd3e6c0dc4',
+  sessionId: '95a7484c-2cf3-49df-90eb-726eeae7e136',
+  throughSeq: 5,
+  folded: 3,
+  kept: 5,
+  prevLines: 2,
+  chars: 242,
+  truncated: false
+}

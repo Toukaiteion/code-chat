@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { openStore } from '../../src/main/persist/index.ts'
 import type { Store } from '../../src/main/persist/index.ts'
+import type { ContextShape } from '../../src/main/domain/context-builder.ts'
 import { locateGit } from '../../src/main/infra/git.ts'
 import { createActiveView } from '../../src/main/ipc/context.ts'
 import {
@@ -263,6 +264,17 @@ export interface HarnessOptions {
   timings?: KillTimings
   /** 合批器的刷新间隔。省略用生产的 33ms。 */
   flushMs?: number
+  /**
+   * ★ 压缩阈值的覆盖（M7c）。省略 = 生产默认值（20 条）——
+   * 跨过它要造二十条历史，所以「压缩真的发生了」那条端到端用例
+   * 必须把 `compactAtCount` 压到几条之内。
+   * 与生产同一条通路（`RuntimeOptions.compactionLimits`）。
+   */
+  compactionLimits?: { compactAtCount: number }
+  /** 会话历史的取数上限（`RuntimeOptions.historyLimit`）。 */
+  historyLimit?: number
+  /** ★ 装配形状的观测缝（`RuntimeOptions.onContextBuilt`）。 */
+  onContextBuilt?: (turnId: string, shape: ContextShape) => void
 }
 
 /** 运行时的 id 计数器**与 ctx 的分开**，否则「id-7」到底是消息还是轮次分不清。 */
@@ -333,7 +345,10 @@ function buildRuntime(
     now: () => NOW,
     newId: () => `rt-${++rtIds}`,
     onWarn: () => {},
-    ...(opts.flushMs !== undefined ? { flushMs: opts.flushMs } : {})
+    ...(opts.flushMs !== undefined ? { flushMs: opts.flushMs } : {}),
+    ...(opts.historyLimit !== undefined ? { historyLimit: opts.historyLimit } : {}),
+    ...(opts.compactionLimits !== undefined ? { compactionLimits: opts.compactionLimits } : {}),
+    ...(opts.onContextBuilt !== undefined ? { onContextBuilt: opts.onContextBuilt } : {})
   })
   return { runtime, view, children, adapters }
 }

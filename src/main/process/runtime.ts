@@ -7,7 +7,9 @@ import type { PushOf } from '../../shared/ipc/contract.ts'
 import { spacePaths } from '../infra/space-dir.ts'
 import { readTextFile } from '../infra/text-file.ts'
 import { createEventBatcher, type BatcherStore, type EventBatcher, type ResumeResult, type StatusPayload, type StreamBatch, type UnreadPayload, type ViewLike } from './event-batcher.ts'
+import { createCompaction, type Compaction } from './compaction.ts'
 import { createFanout, type Fanout } from './fanout.ts'
+import type { CompactLimits } from '../domain/compaction-service.ts'
 import { createScheduler, type Scheduler, type SchedulerState, type StartupSweep } from '../domain/scheduler.ts'
 import { createTurnRunner } from '../domain/turn-runner.ts'
 import { resolveTurnCwd, type CwdDecision } from '../domain/turn-cwd.ts'
@@ -81,6 +83,13 @@ export interface RuntimeOptions {
   unreadMs?: number
   /** 会话历史的**取数**上限（见 `turn-runner.DEFAULT_HISTORY_LIMIT`）。 */
   historyLimit?: number
+  /**
+   * ★ 压缩阈值的覆盖（M7c）。生产由 `main/index.ts` 从 `CODE_CHAT_COMPACTION_N`
+   * 读出来（走查的旋钮）；测试用来在几条消息之内跨过阈值。
+   * **没点名的字段仍是 `compaction-service` 里那一份** —— 覆盖是逐个字段的，
+   * 不是整套替换（见 `resolveCompactLimits`）。
+   */
+  compactionLimits?: Partial<CompactLimits>
   /** ★ 装配形状的观测缝 —— **只传形状、不传正文**（见 `TurnRunnerOptions.onContextBuilt`）。 */
   onContextBuilt?(turnId: string, shape: ContextShape): void
 }
@@ -250,6 +259,53 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     onWarn: opts.onWarn
   })
 
+  /**
+   * ★ 压缩编排（M7c）。**挂在与扇出同一个缝上，排在扇出之前。**
+   *
+   * ⚠️ 它与 `fanout` 的形状差别就在下面这一段，别照着抄错了：
+   * `fanout` 要用 `scheduler`，而调度器**要等 `runner`**，所以它只能把
+   * `dispatch` / `cancelQueued` 放在运行时才求值的位置（上面那段注释）。
+   * **压缩没有环** —— 它只碰库（`session`/`message`/`member`/`actor`），
+   * 一行都不碰调度器。所以这里是老老实实的**直接创建**：
+   * 谁也不必延迟求值，`compaction` 这个常量在下面就是活的。
+   *
+   * ★ 顺序「先压缩、后扇出」：先落定对**过去**的记账，再开始**未来**的事。
+   * 诚实记一句：**今天这个顺序不是 load-bearing 的**（§4.5a 规则一保证同一会话
+   * 不会并起第二轮，两者互不影响）。正因如此它更要写下来 ——
+   * 哪天有人调换了它们，没有任何测试会红。
+   */
+  const compaction: Compaction = createCompaction({
+    store: {
+      tx: store.tx,
+      session: {
+        get: (id) => store.repos.session.get(id),
+        setCompaction: (id, throughSeq, summary) =>
+          store.repos.session.setCompaction(id, throughSeq, summary)
+      },
+      member: { get: (id) => store.repos.member.get(id) },
+      actor: { get: (id) => store.repos.actor.get(id) },
+      message: {
+        get: (id) => store.repos.message.get(id),
+        append: (input) => store.repos.message.append(input),
+        lastSeqBefore: (sessionId, beforeSeq) =>
+          store.repos.message.lastSeqBefore(sessionId, beforeSeq),
+        listBySessionBetween: (sessionId, afterSeq, beforeSeq, limit) =>
+          store.repos.message.listBySessionBetween(sessionId, afterSeq, beforeSeq, limit),
+        markCompactedBySession: (sessionId, throughSeq, summary) =>
+          store.repos.message.markCompactedBySession(sessionId, throughSeq, summary),
+        toolNamesOf: (messageId) => store.repos.message.toolNamesOf(messageId)
+      }
+    },
+    // 诊断的来源与 `turn-runner` 是**同一个**（都走 `opts.adapters`）——
+    // 「CLI 自己压了没」只有这一份记录，两处各读一次拿到的是同一批东西。
+    diagnosticsOf: (kind, turnId) => opts.adapters.diagnosticsOf(kind, turnId),
+    emitNotice: opts.emitNotice,
+    now: opts.now,
+    newId: opts.newId,
+    onWarn: opts.onWarn,
+    ...(opts.compactionLimits !== undefined ? { limits: opts.compactionLimits } : {})
+  })
+
   const runner = createTurnRunner({
     store: {
       turn: {
@@ -290,8 +346,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(opts.maxBudgetUsd !== undefined ? { maxBudgetUsd: opts.maxBudgetUsd } : {}),
     ...(opts.historyLimit !== undefined ? { historyLimit: opts.historyLimit } : {}),
     ...(opts.onContextBuilt !== undefined ? { onContextBuilt: opts.onContextBuilt } : {}),
-    // ★ `@` 扇出：一轮的收尾交给它（**在 `batcher.endTurn` 之后**，见那个选项的说明）。
-    onTurnFinished: (turn, info) => fanout.onTurnFinished(turn, info)
+    /**
+     * ★ 一轮收尾的**两个**接活人（**都在 `batcher.endTurn` 之后**，见那个选项的说明）。
+     *
+     * 顺序是「先压缩、后扇出」，理由与那个顺序的性质写在 `compaction` 的创建处。
+     * 两件事各自都**绝不抛**（扇出与压缩都在自己内部吞），所以这里不需要额外的保护 ——
+     * 但**顺序本身**只由这一行保证，序对调了不会红任何测试。
+     */
+    onTurnFinished: (turn, info) => {
+      compaction.onTurnFinished(turn)
+      fanout.onTurnFinished(turn, info)
+    }
   })
 
   const scheduler: Scheduler = createScheduler({

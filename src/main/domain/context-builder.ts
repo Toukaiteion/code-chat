@@ -1,4 +1,4 @@
-import type { InjectMode, MessageRole } from '../../shared/entities.ts'
+import type { InjectMode, Message, MessageRole } from '../../shared/entities.ts'
 import type { ProjectContext, ProjectContextKind } from '../adapters/agent-adapter.ts'
 import type { TextReadResult } from '../infra/text-file.ts'
 import type { CwdSource } from './turn-cwd.ts'
@@ -110,6 +110,34 @@ export interface ContextProject {
   rootPath: string
 }
 
+/**
+ * 把库里那条 `Message` 变成装配看得懂的 `HistoryMessage`。
+ *
+ * ★ 它**只有一个所有者**（M7c 起）：`turn-runner` 装配历史时用它，压缩折骨架时也用它。
+ * 两处各写一份的后果不是报错，而是**模型看到谁在说话**这件事在两处慢慢分叉 ——
+ * 摘要里写着 `（已移除的成员）`，历史里却写着名字，而没人会发现。
+ *
+ * `nameOf` 是注入的（本模块不碰库）：调用方通常在里面套一个缓存，
+ * 一段历史里作者只有两三个。
+ */
+export function historyMessageOf(
+  m: Message,
+  nameOf: (memberId: string) => string | null
+): HistoryMessage {
+  return {
+    id: m.id,
+    seq: m.seq,
+    role: m.role,
+    authorMemberId: m.authorMemberId,
+    // 作者为空 = 人类用户（空间流里的那种），不需要查名字。
+    authorName: m.authorMemberId === null ? null : nameOf(m.authorMemberId),
+    // `content_text` 可为 NULL（M6a 起流式折叠总是写它，但列本身可空）——
+    // 空正文会被装配层丢掉，这里如实给空串而不是编一个占位符。
+    text: m.contentText ?? '',
+    injectMode: m.injectMode
+  }
+}
+
 export interface ContextBuildInput {
   turn: { id: string; sessionId: string; workspaceId: string }
   actor: { name: string; personaPath: string; personaHash: string }
@@ -127,7 +155,7 @@ export interface ContextBuildInput {
   session: {
     /**
      * ★ **压缩水位的权威**。`message.inject_mode = 'summary'` 只是它的**冗余诊断**：
-     * `markCompacted` 会把同一段摘要**在每条被压掉的消息上各写一遍**
+     * `markCompactedBySession` 会把同一段摘要**在每条被压掉的消息上各写一遍**
      * （`SET inject_mode='summary', summary_text=?`），逐条读它会把摘要重复 N 遍。
      * 而水位线是**单值**的、session 级的 —— 一刀切，没有重复的可能（§6.4）。
      */
@@ -192,6 +220,14 @@ export interface ContextShape {
   /** 被逐条 `inject_mode = 'excluded'` 挡掉的条数（该值目前没有生产者）。 */
   historyExcluded: number
   compactedThroughSeq: number
+  /**
+   * `<summary>` 块**实际贡献的字符数**（没注入 = 0）。
+   *
+   * ★ 它是对「块在位」的**直接**观测。用 `compactedThroughSeq > 0` 去推断会漏掉
+   * 「水位线前进了但摘要为空」（`compaction-summary-missing` 那条 warn 的处境）——
+   * 那时水位线为真而块不在，推断会说「有摘要」。
+   */
+  summaryChars: number
   projectFiles: number
   projectFileBytes: number
   /** 被 CLI 自动注入因而**没进提示词**的文件数（见 `AUTO_INJECTED_FROM_CWD`）。 */
@@ -227,8 +263,13 @@ const CWD_SOURCE_LABEL: Record<CwdSource, string> = {
  * ★ **标签的所有权要唯一。** 本函数负责 `【系统】`/`【用户】`/`【我】`/`【作者名】`；
  * **`【你上一轮的回答】` 由 `renderTurnInput()` 负责**（它给每个 `assistant` 元素加）。
  * 所以「我自己说的」那一条**这里不加标签** —— 加了两边就重复了。
+ *
+ * ★ **导出**（M7c 起）：压缩用的骨架（`domain/compaction-service.ts`）也要给每条历史
+ * 贴同一个标签。那是**同一个词表的两处使用**，不是两个词表 ——
+ * 摘要是**折叠过的历史**，模型会在摘要里读 `【我】`、在历史里读 `【Atlas】`；
+ * 两边各写一份的话，漂移不会报错，只会让模型以为摘要是别人写的。
  */
-function labelOf(h: HistoryMessage, selfMemberId: string): string {
+export function historyLabelOf(h: HistoryMessage, selfMemberId: string): string {
   if (h.role === 'system') return '【系统】'
   if (h.authorMemberId === null) return '【用户】'
   if (h.authorMemberId === selfMemberId) return '【我】'
@@ -252,9 +293,9 @@ function toRenderableMessages(
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
   return history.map((h) => {
     const mine = h.role === 'assistant' && h.authorMemberId === selfMemberId
-    // `mine` 时**不加标签** —— `renderTurnInput` 会加 `【你上一轮的回答】`，见 `labelOf`。
+    // `mine` 时**不加标签** —— `renderTurnInput` 会加 `【你上一轮的回答】`，见 `historyLabelOf`。
     if (mine) return { role: 'assistant' as const, content: h.text }
-    return { role: 'user' as const, content: `${labelOf(h, selfMemberId)}\n${h.text}` }
+    return { role: 'user' as const, content: `${historyLabelOf(h, selfMemberId)}\n${h.text}` }
   })
 }
 
@@ -551,15 +592,26 @@ export async function buildContext(
   prelude.push(proj.text || '（没有任何可见项目提供记忆文件。）')
   prelude.push('</project_context>')
 
+  let summaryChars = 0
   if (through > 0 && input.session.rollingSummary) {
     // ★ 措辞要如实说它是**压缩产物**，别让模型把摘要当原文读。
+    //
+    // ★★ M7c 修正：这里**原先自己拼了一句说明**，而那句话里的条数是
+    // `suppressedByWatermark` —— 它是**本窗口内**被挡掉的条数（窗口上限
+    // `historyLimit`，默认 200），却被写成了「seq ≤ N 的 X 条消息」。
+    // 长会话下它会把 500 条说成 200 条，而且与摘要正文里那个准确的条数
+    // **同场矛盾**——M7a 那会儿 `through > 0` 在生产里不可达，所以它没有机会撒谎。
+    //
+    // 现在说明由**摘要自己**给出（`compaction-service` 的标题行，它数的是真的折了几条），
+    // 这里只负责包一层标签。**一个事实只有一个所有者**：否则两处各算一遍，
+    // 早晚会有一天两边不一致，而那种不一致只会表现为「模型看到的条数不对」。
     prelude.push('<summary>')
-    prelude.push(
-      `【已折叠的历史摘要】seq ≤ ${through} 的 ${suppressedByWatermark} 条消息已被压缩成下面这段，` +
-        '原文不在你的上下文里。'
-    )
     prelude.push(input.session.rollingSummary)
     prelude.push('</summary>')
+    // 这个块在提示词里**逐字**长这样（prelude 是用 `\n\n` 拼的），所以按它算，
+    // 不用「加上分隔符的估算」——`shape` 是要拿去和归档里的读数对账的。
+    summaryChars =
+      '<summary>'.length + 2 + input.session.rollingSummary.length + 2 + '</summary>'.length
   } else if (through > 0) {
     // 水位线前进但摘要为空 —— **这是不一致**，如实报，不假装没有压缩过。
     notes.push({
@@ -597,6 +649,7 @@ export async function buildContext(
       historySuppressed: suppressedByWatermark,
       historyExcluded: excluded,
       compactedThroughSeq: through,
+      summaryChars,
       projectFiles: proj.fileCount,
       projectFileBytes: proj.fileBytes,
       suppressedAutoInjected: proj.suppressed,

@@ -1,0 +1,302 @@
+{
+  "workspace": [
+    {
+      "id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "name": "Vela",
+      "active_project_id": null,
+      "created_at": 1790266802996,
+      "updated_at": 1790266802996,
+      "archived_at": null,
+      "dir_name": "Vela"
+    }
+  ],
+  "project": [
+    {
+      "id": "a167f058-372a-4201-b8a2-304901b78c90",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7c\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790266803003,
+      "last_opened_at": null
+    }
+  ],
+  "actor": [
+    {
+      "id": "ff09dc62-632d-4c5b-91c3-457a7af5837c",
+      "name": "Vela-Atlas",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7c\\persona.md",
+      "persona_hash": "72745a2d7687813bb6a61e1abe30d4038fc549556cc32742116881117c585781",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790266803008,
+      "updated_at": 1790266803008
+    }
+  ],
+  "workspace_member": [
+    {
+      "id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "actor_id": "ff09dc62-632d-4c5b-91c3-457a7af5837c",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790266803010,
+      "updated_at": 1790266803010
+    }
+  ],
+  "member_project": [
+    {
+      "member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "project_id": "a167f058-372a-4201-b8a2-304901b78c90",
+      "is_primary": 1,
+      "created_at": 1790266803013
+    }
+  ],
+  "session": [
+    {
+      "id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "turn_count": 2,
+      "last_seq": 4,
+      "compacted_through_seq": 2,
+      "rolling_summary": "【已折叠的历史摘要】seq ≤ 2 的历史已折叠成下面这段 2 条骨架（每行：[seq] 说话人 正文首段），原文不在你的上下文里。\n[1] 【我】 MK7C-jc5n-T1：不要使用任何工具，不要寒暄，一两句话回复即可。\n[2] 【我】 好的，收到。",
+      "created_at": 1790266803010,
+      "last_active_at": 1790266810066
+    }
+  ],
+  "turn": [
+    {
+      "id": "ed04dac8-45ca-4539-82e2-101e5d6d44ce",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "trigger_message_id": "66c8e864-8d51-4713-832f-b93a2ebe7fb7",
+      "status": "done",
+      "hop_depth": 0,
+      "cwd": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7c\\src-proj",
+      "pid": 35044,
+      "exit_code": null,
+      "error_text": null,
+      "cost_usd": 0.09367,
+      "tokens_in": 18709,
+      "tokens_out": 5,
+      "terminal_reason": "complete",
+      "queued_at": 1790266803866,
+      "started_at": 1790266803884,
+      "ended_at": 1790266806969
+    },
+    {
+      "id": "e5abef89-ae7f-48c8-bba1-8552ea246657",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "trigger_message_id": "5e8cb6eb-e2c6-4e10-bcee-2869bd6fc90d",
+      "status": "done",
+      "hop_depth": 0,
+      "cwd": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7c\\src-proj",
+      "pid": 22028,
+      "exit_code": null,
+      "error_text": null,
+      "cost_usd": 0.093855,
+      "tokens_in": 18746,
+      "tokens_out": 5,
+      "terminal_reason": "complete",
+      "queued_at": 1790266808113,
+      "started_at": 1790266808114,
+      "ended_at": 1790266810066
+    }
+  ],
+  "message": [
+    {
+      "id": "66c8e864-8d51-4713-832f-b93a2ebe7fb7",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "turn_id": null,
+      "role": "user",
+      "author_member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "seq": 1,
+      "content_text": "MK7C-jc5n-T1：不要使用任何工具，不要寒暄，一两句话回复即可。",
+      "content_path": null,
+      "content_bytes": 0,
+      "mentions_json": "[]",
+      "inject_mode": "summary",
+      "summary_text": "【已折叠的历史摘要】seq ≤ 2 的历史已折叠成下面这段 2 条骨架（每行：[seq] 说话人 正文首段），原文不在你的上下文里。\n[1] 【我】 MK7C-jc5n-T1：不要使用任何工具，不要寒暄，一两句话回复即可。\n[2] 【我】 好的，收到。",
+      "created_at": 1790266803866,
+      "edited_at": null,
+      "deleted_at": null
+    },
+    {
+      "id": "1cc9d3b2-ac63-481f-99db-af3f50f01b6e",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "turn_id": "ed04dac8-45ca-4539-82e2-101e5d6d44ce",
+      "role": "assistant",
+      "author_member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "seq": 2,
+      "content_text": "好的，收到。",
+      "content_path": null,
+      "content_bytes": 0,
+      "mentions_json": "[]",
+      "inject_mode": "summary",
+      "summary_text": "【已折叠的历史摘要】seq ≤ 2 的历史已折叠成下面这段 2 条骨架（每行：[seq] 说话人 正文首段），原文不在你的上下文里。\n[1] 【我】 MK7C-jc5n-T1：不要使用任何工具，不要寒暄，一两句话回复即可。\n[2] 【我】 好的，收到。",
+      "created_at": 1790266806204,
+      "edited_at": null,
+      "deleted_at": null
+    },
+    {
+      "id": "5e8cb6eb-e2c6-4e10-bcee-2869bd6fc90d",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "turn_id": null,
+      "role": "user",
+      "author_member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "seq": 3,
+      "content_text": "MK7C-jc5n-T2：不要使用任何工具，不要寒暄，一两句话回复即可。",
+      "content_path": null,
+      "content_bytes": 0,
+      "mentions_json": "[]",
+      "inject_mode": "full",
+      "summary_text": null,
+      "created_at": 1790266808113,
+      "edited_at": null,
+      "deleted_at": null
+    },
+    {
+      "id": "ff762eef-4324-45d2-8d69-659741aaa62c",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "turn_id": "e5abef89-ae7f-48c8-bba1-8552ea246657",
+      "role": "assistant",
+      "author_member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "seq": 4,
+      "content_text": "好的，收到。",
+      "content_path": null,
+      "content_bytes": 0,
+      "mentions_json": "[]",
+      "inject_mode": "full",
+      "summary_text": null,
+      "created_at": 1790266809457,
+      "edited_at": null,
+      "deleted_at": null
+    },
+    {
+      "id": "871cdcc2-1824-4735-a25a-9cc9482c69a6",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "session_id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "turn_id": null,
+      "role": "system",
+      "author_member_id": null,
+      "seq": 5,
+      "content_text": "【系统】历史上下文已压缩：seq ≤ 2 的 2 条消息已折叠成摘要，原文不再进入后续轮次。",
+      "content_path": null,
+      "content_bytes": 0,
+      "mentions_json": "[]",
+      "inject_mode": "full",
+      "summary_text": null,
+      "created_at": 1790266810068,
+      "edited_at": null,
+      "deleted_at": null
+    }
+  ],
+  "message_event": [
+    {
+      "id": 1,
+      "message_id": "1cc9d3b2-ac63-481f-99db-af3f50f01b6e",
+      "seq": 1,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "好的，收到。",
+      "blob_path": null,
+      "bytes": 18,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790266806186
+    },
+    {
+      "id": 2,
+      "message_id": "1cc9d3b2-ac63-481f-99db-af3f50f01b6e",
+      "seq": 2,
+      "kind": "usage",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": "{\"in\":18709,\"out\":5,\"cacheRead\":0,\"cacheCreation\":0,\"thinkingTokens\":0,\"costUsd\":0.09367}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790266806339
+    },
+    {
+      "id": 3,
+      "message_id": "1cc9d3b2-ac63-481f-99db-af3f50f01b6e",
+      "seq": 3,
+      "kind": "done",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": "{\"reason\":\"complete\"}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790266806339
+    },
+    {
+      "id": 4,
+      "message_id": "ff762eef-4324-45d2-8d69-659741aaa62c",
+      "seq": 1,
+      "kind": "text",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": null,
+      "text_blob": "好的，收到。",
+      "blob_path": null,
+      "bytes": 18,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790266809414
+    },
+    {
+      "id": 5,
+      "message_id": "ff762eef-4324-45d2-8d69-659741aaa62c",
+      "seq": 2,
+      "kind": "usage",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": "{\"in\":18746,\"out\":5,\"cacheRead\":0,\"cacheCreation\":0,\"thinkingTokens\":0,\"costUsd\":0.093855}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790266809482
+    },
+    {
+      "id": 6,
+      "message_id": "ff762eef-4324-45d2-8d69-659741aaa62c",
+      "seq": 3,
+      "kind": "done",
+      "tool_use_id": null,
+      "tool_name": null,
+      "payload_json": "{\"reason\":\"complete\"}",
+      "text_blob": null,
+      "blob_path": null,
+      "bytes": 0,
+      "ok": null,
+      "truncated": 0,
+      "created_at": 1790266809482
+    }
+  ]
+}

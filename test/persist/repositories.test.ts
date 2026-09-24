@@ -318,7 +318,7 @@ test('压缩只改对话内容，不碰控制状态（§3.3）', () => {
     now: NOW
   })
 
-  const compacted = s.repos.message.markCompacted(workspaceId, 3, '前三条的摘要')
+  const compacted = s.repos.message.markCompactedBySession(sessionId, 3, '前三条的摘要')
   s.repos.session.setCompaction(sessionId, 3, '前三条的摘要')
 
   assert.equal(compacted.length, 3)
@@ -331,6 +331,184 @@ test('压缩只改对话内容，不碰控制状态（§3.3）', () => {
 
   // ★ 跳数计数器活在自己的表里，压缩碰不到它
   assert.equal(s.repos.turn.get(turn.id)?.hopDepth, 2, '压缩不得重置跳数')
+  s.close()
+})
+
+/** 再起一个成员 + 它的会话（`UNIQUE(workspace_id, member_id)`：一个成员一个会话）。 */
+function secondSession(s: Store, workspaceId: string): string {
+  const actor = s.repos.actor.create({
+    id: 'a2',
+    name: 'Nyx',
+    model: 'deepseek-flash',
+    personaPath: 'personas/nyx.md',
+    personaHash: 'h2',
+    now: NOW
+  })
+  const member = s.repos.member.create({
+    id: 'm2',
+    workspaceId,
+    actorId: actor.id,
+    displayName: '审查者',
+    now: NOW
+  })
+  return s.repos.session.create('sess2', workspaceId, member.id, NOW).id
+}
+
+test('★★ 压缩的标记是**会话粒度**：同空间里别的成员一条都不许动', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+  const session2 = secondSession(s, workspaceId)
+
+  // 先把本会话的 5 条写完（seq 1..5），再写别人的（seq 6..10）。
+  for (let i = 1; i <= 5; i++) {
+    s.repos.message.append({
+      id: `msg-${i}`,
+      workspaceId,
+      sessionId,
+      role: 'user',
+      contentText: `第 ${i} 条`,
+      now: NOW + i
+    })
+  }
+  for (let i = 1; i <= 5; i++) {
+    s.repos.message.append({
+      id: `other-${i}`,
+      workspaceId,
+      sessionId: session2,
+      role: 'user',
+      contentText: `别人 ${i}`,
+      now: NOW + 10 + i
+    })
+  }
+
+  const compacted = s.repos.message.markCompactedBySession(sessionId, 3, '前三条的摘要')
+  assert.equal(compacted.length, 3)
+
+  // ★★ 这条断言就是这次改名的全部理由。按 workspace 粒度标记会把 `other-*`
+  //    一起标成 `summary`，而那些会话的水位线一动没动 —— 后果不是报错，
+  //    而是「B 的历史在库里看起来已经被摘要取代了」，哪天有谁按 `inject_mode`
+  //    去做判断，B 的历史就静默消失。
+  for (let i = 1; i <= 5; i++) {
+    assert.equal(
+      s.repos.message.get(`other-${i}`)?.injectMode,
+      'full',
+      `别的会话的消息被压缩标记碰了：other-${i}`
+    )
+  }
+  assert.equal(s.repos.message.get('msg-1')?.injectMode, 'summary')
+  s.close()
+})
+
+test('压缩不碰已被明确排除的消息，也不碰已软删的', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+
+  for (let i = 1; i <= 4; i++) {
+    s.repos.message.append({
+      id: `msg-${i}`,
+      workspaceId,
+      sessionId,
+      role: 'user',
+      contentText: `第 ${i} 条`,
+      now: NOW + i
+    })
+  }
+  // 一条被明确排除（`excluded` 是装配层**正在读**的状态，压缩不许把它改写掉），
+  // 一条已软删（它已经不注入了，标它只是噪声）。
+  s.repos.message.setInjectMode('msg-2', 'excluded', null)
+  s.repos.message.softDelete('msg-3', NOW)
+
+  const compacted = s.repos.message.markCompactedBySession(sessionId, 4, '摘要')
+  assert.deepEqual(
+    compacted.map((m) => m.id),
+    ['msg-1', 'msg-4'],
+    '只有 `full` 的活行会被标记'
+  )
+  assert.equal(s.repos.message.get('msg-2')?.injectMode, 'excluded', '「排除」的意图不许被压缩改写')
+  s.close()
+})
+
+test('lastSeqBefore 是严格的 `<`，且没有活行时给 null 而不是 0', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+  for (let i = 1; i <= 3; i++) {
+    s.repos.message.append({
+      id: `msg-${i}`,
+      workspaceId,
+      sessionId,
+      role: 'user',
+      contentText: `第 ${i} 条`,
+      now: NOW + i
+    })
+  }
+
+  assert.equal(s.repos.message.lastSeqBefore(sessionId, 3), 2, '严格小于：触发消息自己不算')
+  assert.equal(s.repos.message.lastSeqBefore(sessionId, 99), 3)
+  // ★ 0 是个合法的 seq 值，用它表示「没有」会让调用方在 `seq <= 0` 上做一个静默的错误判断。
+  assert.equal(s.repos.message.lastSeqBefore(sessionId, 1), null)
+
+  // 最大那条被软删之后，右端要退回去 —— 否则水位线会越过一条已经不注入的行。
+  s.repos.message.softDelete('msg-3', NOW)
+  assert.equal(s.repos.message.lastSeqBefore(sessionId, 99), 2)
+  s.close()
+})
+
+test('listBySessionBetween 是开区间、升序，且排除被 `excluded` 的消息', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+  for (let i = 1; i <= 5; i++) {
+    s.repos.message.append({
+      id: `msg-${i}`,
+      workspaceId,
+      sessionId,
+      role: 'user',
+      contentText: `第 ${i} 条`,
+      now: NOW + i
+    })
+  }
+
+  assert.deepEqual(
+    s.repos.message.listBySessionBetween(sessionId, 1, 5, 100).map((m) => m.seq),
+    [2, 3, 4],
+    '两端都是开区间：已在水位线之下的（1）与本轮触发消息（5）都不该进来'
+  )
+
+  // ★ 摘要文本**就是**提示词内容 —— 折进去 = 把被排除的正文悄悄送回上下文。
+  s.repos.message.setInjectMode('msg-3', 'excluded', null)
+  assert.deepEqual(
+    s.repos.message.listBySessionBetween(sessionId, 1, 5, 100).map((m) => m.seq),
+    [2, 4]
+  )
+  s.close()
+})
+
+test('toolNamesOf 去重、按首次出现排序，且不碰 text_blob', () => {
+  const s = openStore(':memory:')
+  const { workspaceId, sessionId } = seed(s)
+  s.repos.message.append({
+    id: 'msg-1',
+    workspaceId,
+    sessionId,
+    role: 'assistant',
+    contentText: '干活',
+    now: NOW
+  })
+  const add = (seq: number, toolName: string | null): void => {
+    s.repos.message.appendEvent({
+      messageId: 'msg-1',
+      kind: 'tool_start',
+      toolName,
+      payloadJson: '{}',
+      now: NOW + seq
+    })
+  }
+  add(1, 'Read')
+  add(2, 'Grep')
+  add(3, 'Read')
+  add(4, null) // 没有工具名的事件不算
+
+  assert.deepEqual(s.repos.message.toolNamesOf('msg-1'), ['Read', 'Grep'], '去重且按首次出现的顺序')
+  assert.deepEqual(s.repos.message.toolNamesOf('不存在的消息'), [])
   s.close()
 })
 

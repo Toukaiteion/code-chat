@@ -14,6 +14,7 @@ import { registerAll } from './ipc/handlers/index.ts'
 import { createChildRegistry } from './process/child-registry.ts'
 import { createAdapterRegistry } from './adapters/registry.ts'
 import { createRuntime, type Runtime } from './process/runtime.ts'
+import { thresholdOverrideFromEnv, type CompactLimits } from './domain/compaction-service.ts'
 import type { PushOf } from '../shared/ipc/contract.ts'
 
 /** 启动期需要告诉用户的事，最终都走 `app:notice` 这一条通道。 */
@@ -67,6 +68,32 @@ function flushNotices(): void {
 }
 
 /**
+ * ★ 压缩阈值的 env 旋钮（M7c）。
+ *
+ * 它是**走查**用的：`CODE_CHAT_COMPACTION_N=2` 让「压缩」在一次走查的三轮里
+ * 真的发生，而不必先造二十条历史。仓库里有两个同形先例
+ * （`CODE_CHAT_CLAUDE_PATH` / `CODE_CHAT_GIT_PATH`）——
+ * ★ 但这一条与前两条有**一处关键差别**，必须写下来：
+ * 前两条进的是**我们 spawn 出去的 CLI 的 env**，而这一条只被读进
+ * **我们自己这个进程**的阈值里，一个字节都不到子进程那边去。
+ * 于是凭据纪律不变：写进去的只有一个整数，`spawn` 那一行（`env: {...process.env}`）
+ * 一个字都不用改。
+ *
+ * ★ **值非法时不静默回退**：`''` / `'abc'` / `'2.5'` / `'0'` / `'-3'` 都会被
+ * `thresholdOverrideFromEnv` 判成问题，这里**先记一条 warn 再用默认值**。
+ * 静默用默认值的坏处很具体：走查里会得到一个「什么都没压」的正常报告，
+ * 而真正的原因（旋钮打错了）在任何地方都看不到。
+ */
+function compactionLimitsFromEnv(): Partial<CompactLimits> | undefined {
+  const read = thresholdOverrideFromEnv(process.env)
+  if (read.problem !== null) {
+    console.warn(`[compaction] ${read.problem}`)
+    return undefined
+  }
+  return read.value === null ? undefined : { compactAtCount: read.value }
+}
+
+/**
  * 起后端。**失败不抛** —— 抛出去会让 `whenReady` 的 promise 静默拒绝，
  * 用户看到的是一个白屏窗口，终端里一行有用的信息都没有（M0 踩过同类坑）。
  * 改为：留下可读日志 + 把错误推给渲染层显示。
@@ -100,6 +127,9 @@ function startBackend(): void {
     // ★ 这一个对象交给 runtime（持引用读）**和** ctx（`view:setActive` 写）。
     //   两个都建自己的话，抑制逻辑就会读一个永远不更新的视图。
     const view = createActiveView()
+
+    // ★ 只读一次：上面那条 warn 因此不会随调用点数量重复。
+    const compactionLimits = compactionLimitsFromEnv()
 
     const runtime = createRuntime({
       store,
@@ -137,7 +167,11 @@ function startBackend(): void {
        * ★ 传的是 `ContextShape`，**不含任何正文**：够回答「装配对不对」，
        * 不够泄露用户的项目内容（归档是要进版本库的）。
        */
-      onContextBuilt: (turnId, shape) => console.log(`[ctx] ${JSON.stringify({ turnId, shape })}`)
+      onContextBuilt: (turnId, shape) => console.log(`[ctx] ${JSON.stringify({ turnId, shape })}`),
+      // ★ 走查的阈值旋钮（`CODE_CHAT_COMPACTION_N`）。没设 / 设得不对都不传 ——
+      //   前者用默认值是对的，后者已经在上面的 warn 里说过了（**只读一次**，
+      //   所以那条 warn 不会重复）。
+      ...(compactionLimits ? { compactionLimits } : {})
     })
 
     const ctx = createContext({ store, sys, runtime, view })

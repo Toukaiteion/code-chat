@@ -28,6 +28,7 @@ import {
   type Harness
 } from './helpers.ts'
 import type { StreamBatch } from '../../src/main/process/event-batcher.ts'
+import type { ContextShape } from '../../src/main/domain/context-builder.ts'
 import type { MessageEvent, Turn } from '../../src/shared/entities.ts'
 
 /** 与 `helpers.fakeCliLaunch()` 同一个脚本 —— 这里要加旗标，所以显式写一遍路径。 */
@@ -549,4 +550,95 @@ test('★ `@` 的目标无效（自己 / 不存在 / 已停用）→ `E_INVALID_
     '★ 校验失败时**什么都不该发生** —— 连自己那一轮也不许建'
   )
   await h.runtime.idle()
+})
+
+// ─────────────────────────────────────────────────────────────
+// 四、历史压缩（M7c）—— 判决 → 落库 → 下一轮装配，整条链
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * ★★ 一条用例把整条链钉住：跨过阈值的那一轮结束时**真的压了**，
+ * 而它的效果在**下一轮**的 `onContextBuilt.shape` 里看得见。
+ *
+ * 为什么非走端到端不可：`compaction-service` 的用例验的是判决，
+ * `process/compaction` 的用例验的是落库 —— 而这两半之间那一段
+ * （`runtime.ts` 把 `compaction.onTurnFinished` 接在 `turn-runner` 的收尾上、
+ * 在 `batcher.endTurn` **之后**）**没有任何单测能覆盖**。
+ * 漏接的样子是：包里一切正常、库里一行没有、界面上一片安静。
+ *
+ * ★ 阈值走生产的同一条通路（`RuntimeOptions.compactionLimits` ← `CODE_CHAT_COMPACTION_N`），
+ * 不是测试专用的后门 —— 所以这一条顺带验了那个旋钮的形状。
+ *
+ * ★ `historyIncluded` 用**对照台**来判：同一份剧本、同样三轮，
+ * 唯一差别是阈值。不这样做的话那个数没法解释 —— 压缩**同时**做两件事
+ * （去掉 2 条被折的、加进 1 条【系统】行），单看一边会把净效应当成结论。
+ */
+test('★★ 端到端：跨过阈值那一轮之后，下一轮的装配里 `<summary>` 在位、被折的历史不在数组里', async () => {
+  const shapes = new Map<string, ContextShape>()
+  const compacted = await scene({
+    cliLaunch: fakeCli('--fake-scenario=normal'),
+    compactionLimits: { compactAtCount: 2 },
+    onContextBuilt: (turnId, shape) => shapes.set(turnId, shape)
+  })
+
+  const turns: string[] = []
+  for (const text of ['第一轮', '第二轮', '第三轮']) {
+    const { turnId } = expectOk<{ turnId: string }>(
+      await compacted.h.call('turn:send', { workspaceId: compacted.workspaceId, memberId: compacted.memberId, text })
+    )
+    turns.push(turnId)
+    await compacted.h.runtime.idle()
+  }
+
+  // ① 判决发生在**第二轮**收尾（此时「本轮之前」正好两条），第三轮之前不压。
+  const shape1 = shapes.get(turns[0]!)!
+  const shape3 = shapes.get(turns[2]!)!
+  assert.equal(shape1.compactedThroughSeq, 0, '第一轮之前没有历史可折')
+  assert.equal(shape1.summaryChars, 0)
+  assert.ok(
+    shape3.compactedThroughSeq > 0,
+    '★ 跨过阈值那一轮结束时压了 —— 而这一行只有 `runtime.ts` 真把钩子接上了才可能为真'
+  )
+  assert.ok(
+    shape3.summaryChars > 0,
+    '★ 水位线前进还不够：<summary> 块必须在**这一轮**的数组里真的拼出来了'
+  )
+
+  // ② 库里的事实：摘要非空，且**本轮的触发消息没被折进去**。
+  const session = compacted.h.store.repos.session.get(compacted.sessionId)!
+  assert.ok(session.rollingSummary?.includes('我来修这个空指针。'), '摘要里要有被折那条的正文')
+  assert.equal(
+    compacted.h.store.repos.message.get(compacted.h.store.repos.turn.get(turns[2]!)!.triggerMessageId!)!
+      .injectMode,
+    'full',
+    '★ 第三轮的触发消息仍是 full —— 把模型自己的请求折进摘要，它就会读到自己的转述'
+  )
+  assert.equal(
+    compacted.h.store.repos.message.get(compacted.h.store.repos.turn.get(turns[1]!)!.triggerMessageId!)!
+      .injectMode,
+    'summary',
+    '（对照：第二轮的触发消息落在水位线之下，已经被折了）'
+  )
+
+  // ③ 对照台：同一个剧本、同样三轮、阈值不触发。
+  const controlShapes = new Map<string, ContextShape>()
+  const control = await scene({
+    cliLaunch: fakeCli('--fake-scenario=normal'),
+    onContextBuilt: (turnId, shape) => controlShapes.set(turnId, shape)
+  })
+  const controlTurns: string[] = []
+  for (const text of ['第一轮', '第二轮', '第三轮']) {
+    const { turnId } = expectOk<{ turnId: string }>(
+      await control.h.call('turn:send', { workspaceId: control.workspaceId, memberId: control.memberId, text })
+    )
+    controlTurns.push(turnId)
+    await control.h.runtime.idle()
+  }
+  const controlShape3 = controlShapes.get(controlTurns[2]!)!
+  assert.equal(controlShape3.compactedThroughSeq, 0, '（对照台必须确实没压 —— 否则下面那对数字不是因果）')
+  assert.ok(
+    shape3.historyIncluded < controlShape3.historyIncluded,
+    `★ 同样的三轮，压过的那一台第三轮数组更短（${shape3.historyIncluded} < ${controlShape3.historyIncluded}）` +
+      `—— 「去掉两条被折的、补进一条系统行」的净效应是负的`
+  )
 })

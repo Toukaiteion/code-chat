@@ -175,11 +175,64 @@ export function messageRepo(db: DatabaseSync) {
     /**
      * 压缩用：把一批消息标记为「已被摘要取代」，并写入摘要。
      * **只改对话内容，不碰控制状态** —— 跳数在 turn 表（§3.3）。
+     *
+     * ★★ **粒度是 session，不是 workspace**（M7c 修正）。原先是
+     * `WHERE workspace_id = ?`，而压缩的权威水位线 `session.compacted_through_seq`
+     * 是**会话级**的 —— 按 workspace 标记会把同空间里**别的成员**的消息一起标成
+     * `summary`，而那些会话的水位线一动没动。后果不是报错，而是：
+     * 那些消息在库里看起来已经被摘要取代了，一旦哪天有谁按 `inject_mode` 去做判断，
+     * B、C 的历史就会静默消失。它在 M7c 之前一直是死代码（零生产调用方），
+     * 所以那个错从没机会发作 —— 接线的那一刻就是处置它的唯一便宜时机。
+     *
+     * `AND inject_mode = 'full'` 保住「已被明确排除」的意图：否则压缩会把
+     * `excluded` 改写成 `summary`，抹掉一个装配层**正在读**的状态。
      */
-    markCompacted: db.prepare(
+    markCompactedBySession: db.prepare(
       `UPDATE message SET inject_mode = 'summary', summary_text = ?
-       WHERE workspace_id = ? AND seq <= ? AND inject_mode = 'full'
+       WHERE session_id = ? AND seq <= ? AND inject_mode = 'full' AND deleted_at IS NULL
        RETURNING *`
+    ),
+
+    // ── 压缩的读侧（M7c）────────────────────────────────────
+    /**
+     * ★ 压缩区间**右端的唯一来源**：`seq < beforeSeq` 的最大活 seq。
+     *
+     * 它比 `MAX(seq)` 多出来的那两件事都是必需的：
+     * - `seq < ?` 实现「**不含本轮触发消息**」——把本轮请求自己折进摘要，
+     *   模型就会在自己的请求里读到「我请求过什么」的转述，而那条请求还在它眼前。
+     * - `deleted_at IS NULL` —— 软删的行不该成为水位线（它已经不注入了）。
+     *
+     * 返回 `null`（**不是 0**）表示区间里没有活行。0 是个合法的 seq 值，
+     * 用它表示「没有」会让调用方在 `seq <= 0` 上做一个静默的错误判断。
+     */
+    lastSeqBefore: db.prepare(
+      `SELECT MAX(seq) AS s FROM message
+       WHERE session_id = ? AND deleted_at IS NULL AND seq < ?`
+    ),
+    /**
+     * 待折的区间：**开区间** `(after, before)`、升序。
+     *
+     * ★ `inject_mode <> 'excluded'` 不是防御性编程：摘要文本**就是**提示词内容，
+     * 把一条被明确排除的正文折进摘要 = 把它悄悄送回上下文。那种错不报错，
+     * 只让「排除」这个状态名存实亡。
+     */
+    listBySessionBetween: db.prepare(
+      `SELECT * FROM message
+       WHERE session_id = ? AND deleted_at IS NULL
+         AND inject_mode <> 'excluded' AND seq > ? AND seq < ?
+       ORDER BY seq ASC LIMIT ?`
+    ),
+    /**
+     * 一条消息里出现过的工具名，**去重**，按**首次出现**的顺序。
+     *
+     * ★ 不许用 `listEvents` 顶替它：那条查询会把 `text_blob` 一起拉出来
+     * （工具输出动辄几百 KB，见 §8.9-9），而这里只要一个名字列表。
+     * 骨架里那句「（工具：Read、Grep）」是模型判断「它到底干了什么」的唯一线索。
+     */
+    toolNamesOf: db.prepare(
+      `SELECT tool_name AS name, MIN(seq) AS first_seq FROM message_event
+       WHERE message_id = ? AND tool_name IS NOT NULL
+       GROUP BY tool_name ORDER BY first_seq ASC`
     ),
 
     // ── message_event ─────────────────────────────────────────
@@ -312,9 +365,32 @@ export function messageRepo(db: DatabaseSync) {
       return row ? mapMessage(row) : null
     },
 
-    /** 把 `seq <= throughSeq` 的 full 消息摘要化。返回受影响的消息。 */
-    markCompacted(workspaceId: string, throughSeq: number, summary: string): Message[] {
-      return (s.markCompacted.all(summary, workspaceId, throughSeq) as Row[]).map(mapMessage)
+    /** 把**本会话** `seq <= throughSeq` 的 full 消息摘要化。返回受影响的消息。 */
+    markCompactedBySession(sessionId: string, throughSeq: number, summary: string): Message[] {
+      return (s.markCompactedBySession.all(summary, sessionId, throughSeq) as Row[]).map(mapMessage)
+    },
+
+    /** 压缩区间右端的唯一来源。`null` = 区间里没有活行（**不是 0**）。 */
+    lastSeqBefore(sessionId: string, beforeSeq: number): number | null {
+      const row = s.lastSeqBefore.get(sessionId, beforeSeq) as { s: number | null }
+      return row.s === null ? null : Number(row.s)
+    },
+
+    /** 待折区间 `(afterSeq, beforeSeq)`，开区间、升序。被 `excluded` 的**不在**里面。 */
+    listBySessionBetween(
+      sessionId: string,
+      afterSeq: number,
+      beforeSeq: number,
+      limit: number
+    ): Message[] {
+      return (
+        s.listBySessionBetween.all(sessionId, afterSeq, beforeSeq, limit) as Row[]
+      ).map(mapMessage)
+    },
+
+    /** 一条消息里用过的工具名，去重、按首次出现排序。只读名字，不拉 `text_blob`。 */
+    toolNamesOf(messageId: string): string[] {
+      return (s.toolNamesOf.all(messageId) as Row[]).map((r) => str(r, 'name'))
     },
 
     // ── 事件 ──────────────────────────────────────────────────

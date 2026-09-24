@@ -20,7 +20,7 @@ import type {
 } from '../../shared/entities.ts'
 import type { ContextShape, HistoryMessage } from './context-builder.ts'
 import type { TextReadResult } from '../infra/text-file.ts'
-import { buildContext } from './context-builder.ts'
+import { buildContext, historyMessageOf } from './context-builder.ts'
 import {
   parseMentionsBlock,
   replyTextOf,
@@ -382,26 +382,15 @@ export function createTurnRunner(opts: TurnRunnerOptions): TurnRunner {
       // 作者名要现查：`message` 表只存 `author_member_id`，而标签需要显示名。
       // 缓存一下 —— 一段历史里作者通常只有两三个。
       const nameCache = new Map<string, string | null>()
-      const toHistory = (m: Message): HistoryMessage => {
-        let authorName: string | null = null
-        if (m.authorMemberId !== null) {
-          if (!nameCache.has(m.authorMemberId)) {
-            nameCache.set(m.authorMemberId, store.member.get(m.authorMemberId)?.displayName ?? null)
-          }
-          authorName = nameCache.get(m.authorMemberId) ?? null
+      const nameOf = (memberId: string): string | null => {
+        if (!nameCache.has(memberId)) {
+          nameCache.set(memberId, store.member.get(memberId)?.displayName ?? null)
         }
-        return {
-          id: m.id,
-          seq: m.seq,
-          role: m.role,
-          authorMemberId: m.authorMemberId,
-          authorName,
-          // `contentText` 可为 NULL（M6a 起流式折叠总是写它，但列本身可空）——
-          // 空正文会在装配层被丢掉，这里如实给空串而不是编一个占位符。
-          text: m.contentText ?? '',
-          injectMode: m.injectMode
-        }
+        return nameCache.get(memberId) ?? null
       }
+      // ★ 映射本身在 `context-builder` 那边（`historyMessageOf`）—— 压缩折骨架时用的是
+      // 同一个函数，于是「谁在说话」在两处不可能分叉。这里只负责提供名字的查法。
+      const toHistory = (m: Message): HistoryMessage => historyMessageOf(m, nameOf)
 
       const rows = store.message.listRecentBySession(session.id, historyLimit + 1)
       // 多取一条只为了**知道有没有被截掉** —— 恰好取满 `limit` 时，多出来那条就是证据。

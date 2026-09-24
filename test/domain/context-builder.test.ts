@@ -16,7 +16,7 @@
  *    于是它可能自己造一份约定（§8.5c 性质 5）。
  * 3. **缓存前缀要保得住。** 第 N 轮的数组必须是第 N+1 轮的**前缀** ——
  *    这是 §4.1 那条「扁平化的纯追加 join 不破坏缓存」的分析，固定成可执行的事实。
- * 4. **压缩的摘要不许被逐条读。** `markCompacted` 把同一段摘要在每条被压掉的
+ * 4. **压缩的摘要不许被逐条读。** `markCompactedBySession` 把同一段摘要在每条被压掉的
  *    消息上各写一遍，逐条读会把摘要重复 N 遍（§6.4）。权威只有一个：会话水位线。
  *
  * 夹具里的历史正文取自真归档 `scripts/evidence/m5-2026-09-23T12-47-39-267Z/main.ndjson`
@@ -295,15 +295,16 @@ test('★ 水位线之下不进数组、`<summary>` 取代它们，且摘要**�
   assert.ok(text.includes('第 3 条'), '水位线之上的照进')
 
   assert.ok(text.includes('<summary>'), '摘要要替换掉那些消息')
-  // ★ 这一条是判决：`markCompacted` 把同一段摘要在**每条**被压掉的消息上各写一遍，
+  // ★ 这一条是判决：`markCompactedBySession` 把同一段摘要在**每条**被压掉的消息上各写一遍，
   // 装配层若逐条读 `summary_text`，N 条被压的消息就会让摘要出现 N 次。
   assert.equal(countOf(build, summary), 1, '同一段摘要只许出现一次')
 })
 
 test('★ `inject_mode` 只是诊断：标了 summary 但**在**水位线之上 → 正文照进，且不进摘要', async () => {
   const { deps } = fakeDeps(stdFixture())
-  // 这正是 §3.1 那个粒度错位的后果形状：workspace 粒度的 markCompacted 把
-  // 另一个成员的消息也标成了 `summary`，而**它的会话水位线没动**。
+  // 这正是 §3.1 那个粒度错位的后果形状（M7c 已把那个标记改成会话粒度，
+  // 所以现在造出这个夹具要手工写 `inject_mode`）：另一个成员的消息被标成
+  // `summary`，而**它的会话水位线没动**。
   // 那些消息的正文是完好的 —— 它们必须照进，否则 B 的历史会静默消失。
   const build = await buildContext(
     inputOf({
@@ -336,6 +337,56 @@ test('水位线前进但摘要为空 → 如实记一条 warn，不假装没压�
   assert.ok(note, '「既没原文也没摘要」是个洞，必须看得见')
   assert.equal(note.level, 'warn')
   assert.equal(allText(build).includes('<summary>'), false, '没有摘要就不许摆一个空的 summary 块')
+})
+
+test('★ `<summary>` 块里除摘要自己之外**不许再加一句话**（M7c 修正的那句谎）', async () => {
+  const { deps } = fakeDeps(stdFixture())
+  // 处境：水位线在 seq 3，而**历史数组里只剩窗口**（seq 50 起）。
+  // 装配层原先自己拼的那句说明写的是 `suppressedByWatermark` —— 它是**本窗口内**
+  // 被挡掉的条数，在这种处境下是 0，于是模型会读到「seq ≤ 3 的 0 条消息已被压缩」。
+  // 真话由摘要自己的标题行给出（`compaction-service` 数的是真折了几条），
+  // 所以这里的判决是：块里**逐字只有**标签与摘要，没有任何我们另加的话。
+  const summary = '【已折叠的历史摘要】seq ≤ 3 的历史已折叠成下面这段 3 条骨架（每行：[seq] 说话人 正文首段），原文不在你的上下文里。\n[1] 【用户】 把 a.ts 的 x 改成 2'
+  const history = Array.from({ length: 6 }, (_, i) => msg({ seq: 50 + i }))
+  const build = await buildContext(
+    inputOf({ history, session: { compactedThroughSeq: 3, rollingSummary: summary } }),
+    deps
+  )
+  const text = allText(build)
+
+  assert.ok(
+    text.includes(`<summary>\n\n${summary}\n\n</summary>`),
+    '块里必须是「标签 + 摘要」逐字，多一句少一句都不行'
+  )
+})
+
+test('`summaryChars` 是「块在位」的直接证据（水位线推断不出这件事）', async () => {
+  const { deps } = fakeDeps(stdFixture())
+  const summary = '一段摘要'
+  const withSummary = await buildContext(
+    inputOf({ history: [msg({ seq: 1 }), msg({ seq: 2 })], session: { compactedThroughSeq: 1, rollingSummary: summary } }),
+    deps
+  )
+  assert.equal(
+    withSummary.shape.summaryChars,
+    '<summary>'.length + 2 + summary.length + 2 + '</summary>'.length,
+    '写多少就是多少 —— 这个数要拿去和归档里的读数对账'
+  )
+
+  const noSummary = await buildContext(
+    inputOf({ history: [msg({ seq: 1 })], session: { compactedThroughSeq: 0, rollingSummary: null } }),
+    deps
+  )
+  assert.equal(noSummary.shape.summaryChars, 0)
+
+  // ★ 这一条才是它存在的理由：水位线前进了，而块**不在** —— 只看
+  // `compactedThroughSeq > 0` 会得出「有摘要」，那是错的。
+  const missing = await buildContext(
+    inputOf({ history: [msg({ seq: 1 })], session: { compactedThroughSeq: 1, rollingSummary: null } }),
+    deps
+  )
+  assert.ok(missing.shape.compactedThroughSeq > 0)
+  assert.equal(missing.shape.summaryChars, 0, '水位线 > 0 而摘要为空时，块不在就是不在')
 })
 
 // ─────────────────────────────────────────────────────────────

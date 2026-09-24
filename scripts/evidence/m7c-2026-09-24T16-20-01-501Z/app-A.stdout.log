@@ -1,0 +1,5 @@
+
+[main] 数据库已就绪：C:\Users\RedMoon\AppData\Local\Temp\cc-m7c\userdata\code-chat.db（schema v2）
+[ctx] {"turnId":"ed04dac8-45ca-4539-82e2-101e5d6d44ce","shape":{"messageCount":2,"contentChars":370,"systemPromptChars":286,"historyTotal":1,"historyIncluded":1,"historySuppressed":0,"historyExcluded":0,"compactedThroughSeq":0,"summaryChars":0,"projectFiles":0,"projectFileBytes":0,"suppressedAutoInjected":0,"personaBytes":185,"roleDescBytes":null}}
+[ctx] {"turnId":"e5abef89-ae7f-48c8-bba1-8552ea246657","shape":{"messageCount":4,"contentChars":416,"systemPromptChars":286,"historyTotal":3,"historyIncluded":3,"historySuppressed":0,"historyExcluded":0,"compactedThroughSeq":0,"summaryChars":0,"projectFiles":0,"projectFileBytes":0,"suppressedAutoInjected":0,"personaBytes":185,"roleDescBytes":null}}
+[ctx] {"turnId":"adc43b81-475f-4586-ac59-c3dd3e6c0dc4","shape":{"messageCount":5,"contentChars":618,"systemPromptChars":286,"historyTotal":6,"historyIncluded":4,"historySuppressed":2,"historyExcluded":0,"compactedThroughSeq":2,"summaryChars":149,"projectFiles":0,"projectFileBytes":0,"suppressedAutoInjected":0,"personaBytes":185,"roleDescBytes":null}}

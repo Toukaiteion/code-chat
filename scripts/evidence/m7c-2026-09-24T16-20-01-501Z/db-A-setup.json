@@ -1,0 +1,81 @@
+{
+  "workspace": [
+    {
+      "id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "name": "Vela",
+      "active_project_id": null,
+      "created_at": 1790266802996,
+      "updated_at": 1790266802996,
+      "archived_at": null,
+      "dir_name": "Vela"
+    }
+  ],
+  "project": [
+    {
+      "id": "a167f058-372a-4201-b8a2-304901b78c90",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "name": "sandbox",
+      "root_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7c\\src-proj",
+      "origin": "local",
+      "remote_url": null,
+      "default_branch": null,
+      "created_at": 1790266803003,
+      "last_opened_at": null
+    }
+  ],
+  "actor": [
+    {
+      "id": "ff09dc62-632d-4c5b-91c3-457a7af5837c",
+      "name": "Vela-Atlas",
+      "avatar": null,
+      "agent_kind": "claude",
+      "model": "deepseek-flash",
+      "effort": "low",
+      "persona_path": "C:\\Users\\RedMoon\\AppData\\Local\\Temp\\cc-m7c\\persona.md",
+      "persona_hash": "72745a2d7687813bb6a61e1abe30d4038fc549556cc32742116881117c585781",
+      "skills_json": "[]",
+      "memory_json": "[]",
+      "created_at": 1790266803008,
+      "updated_at": 1790266803008
+    }
+  ],
+  "workspace_member": [
+    {
+      "id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "actor_id": "ff09dc62-632d-4c5b-91c3-457a7af5837c",
+      "display_name": "Atlas",
+      "role_desc_path": null,
+      "role_desc_hash": null,
+      "permission_json": "{}",
+      "is_router": 0,
+      "enabled": 1,
+      "created_at": 1790266803010,
+      "updated_at": 1790266803010
+    }
+  ],
+  "member_project": [
+    {
+      "member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "project_id": "a167f058-372a-4201-b8a2-304901b78c90",
+      "is_primary": 1,
+      "created_at": 1790266803013
+    }
+  ],
+  "session": [
+    {
+      "id": "95a7484c-2cf3-49df-90eb-726eeae7e136",
+      "workspace_id": "59488972-793a-414f-83c5-2a39cdf52cdd",
+      "member_id": "c5a99522-6eb1-4d6a-9df8-afa14468f55a",
+      "turn_count": 0,
+      "last_seq": 0,
+      "compacted_through_seq": 0,
+      "rolling_summary": null,
+      "created_at": 1790266803010,
+      "last_active_at": null
+    }
+  ],
+  "turn": [],
+  "message": [],
+  "message_event": []
+}

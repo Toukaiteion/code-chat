@@ -1,0 +1,36 @@
+
+──── M7c 走查 · 准备 ───────────────────────────────────────────────────────────
+  沙箱            C:\Users\RedMoon\AppData\Local\Temp\cc-m7c
+  标记后缀        pqct
+  模型            deepseek-flash（端点 = 本机默认凭据所指向的那个，**不是 Anthropic 官方**）
+  预算闸          --max-budget-usd 0.50（turn-runner 的默认值，每轮一道）
+  压缩阈值        CODE_CHAT_COMPACTION_N=abc（★ **刻意非法**：干跑要证明「应用真的读了这个变量」只可能靠它出一声）
+  空间            Vela（单成员 Atlas，人设不提 `@`）：三轮 = 阈值下 → 跨过 → 下一轮装配
+
+──── 启动 A · 夹具 ─────────────────────────────────────────────────────────────
+  应用 A 起来了：pid=36556
+
+采集中断：页面内异常：TypeError: Cannot read properties of undefined (reading 'hook')
+    at <anonymous>:1:14
+
+──── 干跑：只判地基（零成本，一个轮次都没发） ──────────────────────────────────────────────────
+  ❌ 采集器记到一条错误：[collect] 页面内异常：TypeError: Cannot read properties of undefined (reading 'hook')
+    at <anonymous>:1:14
+  ❌ preload 桥在**构建产物**里可用（invoke=undefined on=undefined）—— dev 能跑不等于构建版能跑，走查跑的是构建版
+  ❌ 渲染进程重载之后桥又回来了（重载是夹具变成界面可见的唯一手段）
+  ❌ 推送钩子装上了（stream:batch / stream:status / workspace:unread / app:notice）
+  ❌ 在左栏点得中空间（装配出来的空间在界面上真的存在）
+  ❌ 顶栏渲染出来了、而且显示的是被选中的那个空间的名字：undefined
+  ❌ 点「对话」真的打开了对话视图、输入区在里面（textarea=undefined）
+  ❌ 发送按钮在（页面上共 undefined 个 button）
+  ❌ 受控输入：写进 textarea = undefined，发送按钮因此变为可点（disabled=undefined）—— disabled 还是 true 就说明 React 没收到 onChange，点了发送也不会有任何事发生
+  ❌ 压缩的接线与顺序都在（createCompaction=undefined 压缩在扇出之前=undefined env 旋钮被读=undefined 阈值透传=undefined）—— **静态核对**：它不证明判决对，只证明没忘了接（? 与 ?）
+  ❌ ★ 旋钮真的被应用读到了：`CODE_CHAT_COMPACTION_N=abc`（**刻意非法**）⇒ 主进程出一声 「（没有这一声）」—— 它同时证明了这个变量被读、我们的 process.env 传到了子进程、且非法值不静默回退
+  ❌ 页面内辅助函数全跑通（0/7 个）；它们在真机上抛一次就会让采集在**已经花过钱之后**中断
+  ❌ 夹具建完之后水位线是 0（一个轮次都没发，所以它**必须**还没动）
+  ⚠️ ⚠️ **干跑测不到**：压了没有、摘要长什么样、下一轮的装配读到没有 —— 它们都要真轮次才有内容，`report()` 把它们当第一等判据。⚠️ 还有一条更细的：干跑**只能证明应用读了这个变量**，「有效值被采纳」只能由真跑里「两条就压了」间接证明（默认阈值 20，三轮够不着）
+
+──── 干跑结束 ──────────────────────────────────────────────────────────────────
+  归档目录：G:\project\code-chat\scripts\evidence\m7c-2026-09-24T16-18-30-774Z
+  结论     13 条不通过 —— **先修地基，再花真钱**（另有 1 条「无法判定」）
+  A 被硬杀（pid=36556）

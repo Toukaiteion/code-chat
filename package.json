@@ -28,6 +28,9 @@
     "walk:m7b": "npm run build && node scripts/m7b-walkthrough.ts",
     "walk:m7b:dry": "npm run build && node scripts/m7b-walkthrough.ts --dry",
     "walk:m7b:replay": "node scripts/m7b-walkthrough.ts --replay",
+    "walk:m7c": "npm run build && node scripts/m7c-walkthrough.ts",
+    "walk:m7c:dry": "npm run build && node scripts/m7c-walkthrough.ts --dry",
+    "walk:m7c:replay": "node scripts/m7c-walkthrough.ts --replay",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "check:helpers": "node scripts/check-page-helpers.cjs"
